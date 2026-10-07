@@ -1,0 +1,12 @@
+# Python environment and caches
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# API keys live here, never commit them
+.env
+
+# Real emails contain personal data (your address, names, tracking IDs) and should not be committed
+# Only synthetic fixtures in tests/fixtures/ are committed
+data/
