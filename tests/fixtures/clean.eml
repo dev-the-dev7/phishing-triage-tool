@@ -1,0 +1,42 @@
+Received: from mail.example.com (mail.example.com [192.0.2.10])
+        by mx.example.net with ESMTPS id f6e5d4c3b2
+        for <jordan.lee@example.net>; Fri, 02 Oct 2026 08:30:05 -0700 (PDT)
+Authentication-Results: mx.example.net;
+       spf=pass (example.net: domain of orders@example.com designates 192.0.2.10 as permitted sender) smtp.mailfrom=orders@example.com;
+       dkim=pass header.d=example.com;
+       dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.com
+Return-Path: <orders@example.com>
+From: "Example Store" <orders@example.com>
+Reply-To: <support@example.com>
+To: Jordan Lee <jordan.lee@example.net>
+Subject: Your order #10442 has shipped
+Date: Fri, 02 Oct 2026 15:30:01 +0000
+Message-ID: <order-10442-shipped@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="alt-boundary"
+
+--alt-boundary
+Content-Type: text/plain; charset="utf-8"
+
+Hi Jordan,
+
+Good news: your order #10442 has shipped and should arrive by Tuesday.
+
+Track it here: https://www.example.com/orders/10442
+
+Thanks for shopping with us,
+Example Store
+
+--alt-boundary
+Content-Type: text/html; charset="utf-8"
+
+<html>
+<body>
+<p>Hi Jordan,</p>
+<p>Good news: your order #10442 has shipped and should arrive by Tuesday.</p>
+<p><a href="https://www.example.com/orders/10442">Track your order</a></p>
+<p>Thanks for shopping with us,<br>Example Store</p>
+</body>
+</html>
+
+--alt-boundary--

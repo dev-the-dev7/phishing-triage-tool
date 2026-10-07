@@ -1,0 +1,66 @@
+Received: from mail.paypa1.com (mail.paypa1.com [203.0.113.45])
+        by mx.example.net with ESMTPS id a1b2c3d4e5
+        for <jordan.lee@example.net>; Mon, 05 Oct 2026 09:14:22 -0700 (PDT)
+Authentication-Results: mx.example.net;
+       spf=pass (example.net: domain of bounce@paypa1.com designates 203.0.113.45 as permitted sender) smtp.mailfrom=bounce@paypa1.com;
+       dkim=none;
+       dmarc=fail (p=NONE sp=NONE dis=NONE) header.from=paypa1.com
+Authentication-Results: mx.paypal.com;
+       spf=pass smtp.mailfrom=paypal.com;
+       dkim=pass header.d=paypal.com;
+       dmarc=pass header.from=paypal.com
+Received: from [198.51.100.23] (unknown [198.51.100.23])
+        by mail.paypa1.com with ESMTP id 7f8e9d;
+        Mon, 05 Oct 2026 16:14:19 +0000
+Return-Path: <bounce@paypa1.com>
+From: "PayPal Security" <security@paypa1.com>
+Reply-To: <case-review@account-resolution.example>
+To: Jordan Lee <jordan.lee@example.net>
+Subject: Action required: your account has been limited
+Date: Mon, 05 Oct 2026 16:14:18 +0000
+Message-ID: <20261005161418.4417@paypa1.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="outer-boundary"
+
+--outer-boundary
+Content-Type: multipart/alternative; boundary="alt-boundary"
+
+--alt-boundary
+Content-Type: text/plain; charset="utf-8"
+
+Dear Customer,
+
+We noticed unusual activity on your account and have temporarily limited it.
+To restore access, confirm your details within 24 hours:
+
+http://paypa1.com/login/verify?case=88213
+
+If you have questions, reply to this email or visit https://bit.ly/3pPx9Qz
+
+PayPal Security Team
+
+--alt-boundary
+Content-Type: text/html; charset="utf-8"
+
+<html>
+<body>
+<p>Dear Customer,</p>
+<p>We noticed unusual activity on your account and have temporarily limited it.
+To restore access, confirm your details within 24 hours:</p>
+<p><a href="http://paypa1.com/login/verify?case=88213">https://www.paypal.com/myaccount/security</a></p>
+<p>If you have questions, reply to this email or visit <a href="https://bit.ly/3pPx9Qz">our help center</a>.</p>
+<p>PayPal Security Team</p>
+<img src="http://203.0.113.45/t.gif?u=jordan.lee" width="1" height="1">
+</body>
+</html>
+
+--alt-boundary--
+
+--outer-boundary
+Content-Type: application/pdf; name="Account_Statement.pdf"
+Content-Disposition: attachment; filename="Account_Statement.pdf"
+Content-Transfer-Encoding: base64
+
+SGFybWxlc3MgdGVzdCBhdHRhY2htZW50IGZvciBwaGlzaGluZy10cmlhZ2UtdG9vbCBmaXh0dXJlcy4K
+
+--outer-boundary--
