@@ -3,6 +3,8 @@
 import argparse
 import sys
 
+from .parser import parse_file
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -35,7 +37,26 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
-    print("Pipeline not built yet. Arguments received:", vars(args))
+    if args.text:
+        print("Text mode isn't built yet.", file=sys.stderr)
+        return 1
+
+    try:
+        parsed = parse_file(args.eml)
+    except (OSError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    # Temporary summary until the report module exists
+    sender = parsed.from_addr.email if parsed.from_addr else "(missing)"
+    print(f"From:        {sender}")
+    print(f"Subject:     {parsed.subject}")
+    print(f"Links:       {len(parsed.links)}")
+    print(f"Attachments: {len(parsed.attachments)}")
+    for a in parsed.attachments:
+        print(f"  {a.sha256}  {a.filename} ({a.content_type}, {a.size} bytes)")
+    for w in parsed.parse_warnings:
+        print(f"Warning:     {w}")
     return 0
 
 
