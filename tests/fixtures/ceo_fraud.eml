@@ -1,0 +1,26 @@
+Received: from mail-sor-f77.google.com (mail-sor-f77.google.com [198.51.100.77])
+        by mx.example.net with ESMTPS id c9d8e7f6a5
+        for <jordan.lee@example.net>; Tue, 06 Oct 2026 07:42:10 -0700 (PDT)
+Authentication-Results: mx.example.net;
+       spf=pass (example.net: domain of ceo.fraud.example@gmail.com designates 198.51.100.77 as permitted sender) smtp.mailfrom=ceo.fraud.example@gmail.com;
+       dkim=pass header.d=gmail.com;
+       dmarc=pass (p=NONE sp=QUARANTINE dis=NONE) header.from=gmail.com
+Return-Path: <ceo.fraud.example@gmail.com>
+From: "Sarah Chen" <ceo.fraud.example@gmail.com>
+To: Jordan Lee <jordan.lee@example.net>
+Subject: Quick favor
+Date: Tue, 06 Oct 2026 14:42:07 +0000
+Message-ID: <CAF8x2kQ7Lm0vR3nT9wYpE1bH4sJ6dUa@mail.gmail.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+
+Jordan,
+
+Are you at your desk? I need you to pick up some gift cards for a client
+meeting this afternoon. Keep this between us for now, I'll explain later.
+
+Let me know as soon as you see this.
+
+Sarah
+
+Sent from my iPhone
