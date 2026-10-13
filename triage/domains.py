@@ -48,26 +48,34 @@ C0_OR_SPACE = "".join(chr(i) for i in range(0x21))  # control characters and the
 TAB_OR_NEWLINE = str.maketrans("", "", "\t\n\r")
 
 
-def url_host(url: str) -> str | None:
-    # The host a link goes to, read the way a browser reads it. Python's urlsplit follows
+def browser_url(url: str) -> str:
+    # The link rewritten so Python's urlsplit finds the host a browser goes to. Python follows
     # the URL RFC, and browsers differ from it in ways phishers use. All of these go to evil.com:
     #   http://evil.com\@paypal.com      \ counts as /, so @paypal.com is part of the path
     #   http:\\evil.com, http:/evil.com  any slashes after http: work
     #   \\evil.com, /\evil.com           with no scheme, two slashes of either kind take the
     #                                    webmail page's https, like //evil.com does
-    #   http://%65vil.com                the host is percent-decoded
-    #   http://ｅｖｉｌ。com             fullwidth letters and other dots are read as plain ones
+    #   http://x[@evil.com               the login part, up to the last @, is skipped. Python's
+    #                                    parser refuses a [ or ] in it and finds no host at all.
     #   h<tab>ttp://evil.com             tabs and line breaks are dropped, and so are control
     #                                    characters and spaces at either end
-    # A trailing dot is dropped as well, since evil.com. is the same site in DNS.
     url = url.strip(C0_OR_SPACE).translate(TAB_OR_NEWLINE)
     if re.match(r"[/\\]{2}", url):
         url = "https:" + url
     web_link = re.match(r"(https?):[/\\]*", url, re.I)
     if web_link:
-        url = f"{web_link.group(1)}://" + url[web_link.end():].replace("\\", "/")
+        rest = url[web_link.end():].replace("\\", "/")
+        login_and_host = re.match(r"[^/?#]*", rest).group()
+        url = f"{web_link.group(1)}://{login_and_host.rpartition('@')[2]}{rest[len(login_and_host):]}"
+    return url
+
+
+def url_host(url: str) -> str | None:
+    # The host a link goes to, read the way a browser reads it (see browser_url). The host is
+    # percent-decoded (http://%65vil.com), and fullwidth letters and other dots are read as plain
+    # ones (http://ｅｖｉｌ。com). A trailing dot is dropped, since evil.com. is the same site in DNS.
     try:
-        name = urlsplit(url).hostname
+        name = urlsplit(browser_url(url)).hostname
     except ValueError:
         return None
     if not name:

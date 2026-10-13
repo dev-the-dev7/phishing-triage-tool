@@ -3,11 +3,12 @@
 import email
 import email.policy
 import hashlib
+import re
 from email.utils import getaddresses
 from html.parser import HTMLParser
 from urllib.parse import urljoin
 
-from .domains import url_host
+from .domains import C0_OR_SPACE, TAB_OR_NEWLINE, browser_url, url_host
 from .models import Address, Attachment, Link, ParsedEmail
 
 # Microsoft 365's largest allowed message. A bigger file isn't a real email, and the
@@ -18,6 +19,10 @@ MAX_EMAIL_BYTES = 150 * 1024 * 1024
 # library gets very slow on longer ones (a 160 KB Content-Type took 90 seconds): its parser
 # is quadratic in places, and it parses a header again every time it's read.
 MAX_HEADER_LENGTH = 4 * 1024
+
+# Real emails have one <base> tag at most. Every link is read against each base (see
+# _extract_links), so without a limit, thousands of both would take minutes.
+MAX_BASES = 10
 
 
 class _HeaderLengthPolicy(email.policy.EmailPolicy):
@@ -222,21 +227,30 @@ class _LinkCollector(HTMLParser):
     def __init__(self):
         super().__init__()
         self.links = []
-        self.base = None  # the first <base href>, which sets where relative links go
+        self.bases = []  # every <base href>, which sets where relative links go
         self._href = None
         self._text = []
 
     def handle_starttag(self, tag, attrs):
-        # Browsers use the first href when a tag has two. dict(attrs) would keep the last.
-        href = next((value for name, value in attrs if name == "href"), None)
-        if tag == "base" and href and self.base is None:
-            self.base = href.strip()
+        # Browsers use the first href when a tag has two. dict(attrs) would keep the last. An
+        # href with no value (<a href>) is an empty link to a browser. Python's parser gives None.
+        href = next((value or "" for name, value in attrs if name == "href"), None)
+        if href is None and tag == "a":
+            # An SVG link can give its address in xlink:href instead
+            href = next((value or "" for name, value in attrs if name == "xlink:href"), None)
+        # Trimmed the way browsers trim a link. Python's strip() would also drop a no-break
+        # space, which browsers keep: to them "\xa0https://x.com/" is a relative link, not x.com.
+        if href is not None:
+            href = href.strip(C0_OR_SPACE)
+        if tag == "base" and href:
+            self.bases.append(href)
         if tag != "a":
             return
         # If the previous <a> was never closed, end it before starting this one
         self._finish()
-        if href:
-            self._href = href.strip()
+        # An empty href is still a link, to the page or its <base>
+        if href is not None:
+            self._href = href
             self._text = []
 
     def handle_data(self, data):
@@ -258,8 +272,6 @@ class _LinkCollector(HTMLParser):
 
 
 def _extract_links(html: str, warnings) -> list[Link]:
-    if not html:
-        return []
     collector = _LinkCollector()
     try:
         collector.feed(html)
@@ -269,24 +281,50 @@ def _extract_links(html: str, warnings) -> list[Link]:
         collector._finish()
         warnings.append(f"HTML body couldn't be fully parsed ({type(e).__name__}), links after that point may be missing")
 
+    # <base href="https://evil.com/"> makes <a href="/login"> go to evil.com. This is the
+    # baseStriker trick. Browsers use the first <base>, but skip one inside <template> or <svg>,
+    # and Python's parser can't tell where a tag sits. So links are read against every base,
+    # and a decoy in front can't hide the real one. A base is read like a link, so one a
+    # browser accepts (https:\\evil.com\) works here too.
+    bases = list(dict.fromkeys(browser_url(base) for base in collector.bases))
+    if len(bases) > MAX_BASES:
+        warnings.append(f"The HTML has {len(bases)} different <base> tags, which set where links go. "
+                        f"Links were read against the first {MAX_BASES}. Check the rest by hand.")
+    elif len(bases) > 1:
+        warnings.append(f"The HTML has {len(bases)} different <base> tags. Browsers use one, "
+                        "so links were read against each.")
     links = []
     for link in collector.links:
-        if collector.base and not url_host(link.href):
-            # <base href="https://evil.com/"> makes <a href="/login"> go to evil.com. This is
-            # the baseStriker trick. Links with a host of their own keep it.
+        if not bases or not _uses_base(link.href):
+            links.append(link)
+            continue
+        readings = {}
+        for base in bases[:MAX_BASES]:
             try:
-                link = Link(urljoin(collector.base, link.href), link.text)
+                href = urljoin(base, link.href)
             except ValueError:
-                pass  # a broken <base> leaves the link as written
-        links.append(link)
+                href = link.href  # a broken <base> leaves the link as written
+            readings.setdefault(href, Link(href, link.text))
+        links.extend(readings.values())
     return links
+
+
+def _uses_base(href: str) -> bool:
+    # A link with no host of its own is read against the base. Links with a host keep it,
+    # except one with a scheme but not two slashes: on an https base, browsers read
+    # https:paypal.com as a page on the base's site. urljoin does the same, and leaves the
+    # link as written when its scheme isn't the base's: http:paypal.com still goes to paypal.com.
+    if not url_host(href):
+        return True
+    return re.match(r"[a-z][a-z\d+.-]*:(?![/\\]{2})", href.translate(TAB_OR_NEWLINE), re.I) is not None
 
 
 def _attached_emails(msg) -> list[str]:
     # message/rfc822 is an attached email, and message/global is the same with UTF-8 headers.
-    # Outlook's .msg is its own format, found by name.
+    # Outlook's .msg is its own format, found by name. Only this email's own parts are
+    # searched: an email inside an attached one gets checked when that one is run on its own.
     names = []
-    for part in msg.walk():
+    for part in _own_parts(msg):
         filename = part.get_filename() or ""
         is_email_type = part.get_content_type() in ("message/rfc822", "message/global")
         if is_email_type or filename.lower().endswith((".eml", ".msg")):
