@@ -1,0 +1,10 @@
+# coverage run -m pytest, then coverage report
+[run]
+# Also checks that each if was tested both ways, not only that its lines ran
+branch = true
+source = triage
+# Also measures the test that runs python -m triage as its own process
+patch = subprocess
+
+[report]
+show_missing = true

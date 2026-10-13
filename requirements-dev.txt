@@ -1,0 +1,4 @@
+# Only needed to run the tests, so installing the tool doesn't pull these in
+-r requirements.txt
+pytest==9.1.1
+coverage==7.16.2
