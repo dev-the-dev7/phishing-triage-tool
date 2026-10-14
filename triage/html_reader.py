@@ -2,7 +2,7 @@
 text the reader sees, and text hidden inside words or added by CSS."""
 
 import re
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from html.parser import HTMLParser
 from itertools import groupby
 from urllib.parse import urljoin
@@ -287,9 +287,20 @@ def _is_zero(value: str) -> bool:
     return "0" in value and re.fullmatch(r"[0.]+(?:[a-z]+|%)?", value) is not None
 
 
-def read_html(html: str, warnings) -> _HTMLCollector:
+@dataclass
+class ParsedHTML:
+    # What read_html finds in one HTML part, for the parser to add to the ParsedEmail
+    text: str  # what the reader sees, one line per block
+    hidden_in_words: list[str]  # hidden text found inside a shown word
+    css_added_text: list[str]  # text <style> blocks add
+    images: int  # images a browser would show
+    links: list[Link]
+    other_urls: list[str]  # what the HTML loads or sends a form to
+
+
+def read_html(html: str, warnings) -> ParsedHTML:
     # One HTML part's links, other URLs and text, with relative links read against its <base>
-    collector = _collect(html, warnings)
+    parsed = _collect(html, warnings)
     # Outlook for Windows shows what's inside <!--[if mso]> ... <![endif]-->, and every other
     # client reads it as a comment, so a link can be there for Outlook users only. A link can
     # start in one of these parts and end in another, with its text between them, so the HTML
@@ -300,14 +311,14 @@ def read_html(html: str, warnings) -> _HTMLCollector:
         outlook_warnings = []
         outlook = _collect(outlook_html, outlook_warnings)
         warnings += [warning for warning in outlook_warnings if warning not in warnings]
-        seen = {(link.href, link.text, link.full_text) for link in collector.links}
-        collector.links += [link for link in outlook.links if (link.href, link.text, link.full_text) not in seen]
-        known = set(collector.other_urls)
-        collector.other_urls += [url for url in outlook.other_urls if url not in known]
-    return collector
+        seen = {(link.href, link.text, link.full_text) for link in parsed.links}
+        parsed.links += [link for link in outlook.links if (link.href, link.text, link.full_text) not in seen]
+        known = set(parsed.other_urls)
+        parsed.other_urls += [url for url in outlook.other_urls if url not in known]
+    return parsed
 
 
-def _collect(html: str, warnings) -> _HTMLCollector:
+def _collect(html: str, warnings) -> ParsedHTML:
     collector = _HTMLCollector()
     try:
         collector.feed(html)
@@ -330,14 +341,16 @@ def _collect(html: str, warnings) -> _HTMLCollector:
     elif len(bases) > 1:
         warnings.append(f"The HTML has {len(bases)} different <base> tags. Browsers use one, "
                         "so links were read against each.")
-    collector.links = [replace(link, href=href) for link in collector.links
-                       for href in _read_against_bases(link.href, bases)]
-    collector.other_urls = [href for url in collector.other_urls for href in _read_against_bases(url, bases)]
     shown = "".join(text for text, hidden in collector.pieces if not hidden)
-    collector.text = "\n".join(_collapse_whitespace(line) for line in shown.split("\n") if line.strip())
-    collector.hidden_in_words = _hidden_in_words(collector.pieces)
-    collector.css_added_text = _css_added_text("".join(collector.css))
-    return collector
+    return ParsedHTML(
+        text="\n".join(_collapse_whitespace(line) for line in shown.split("\n") if line.strip()),
+        hidden_in_words=_hidden_in_words(collector.pieces),
+        css_added_text=_css_added_text("".join(collector.css)),
+        images=collector.images,
+        links=[replace(link, href=href) for link in collector.links
+               for href in _read_against_bases(link.href, bases)],
+        other_urls=[href for url in collector.other_urls for href in _read_against_bases(url, bases)],
+    )
 
 
 def _split_by_tags(marked: str) -> list[str]:
