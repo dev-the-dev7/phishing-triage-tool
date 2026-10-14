@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from triage.checks import run_checks
+from triage.iocs import from_email
 from triage.parser import parse_bytes
 from triage.received import find_origin, received_warnings
 
@@ -21,7 +22,7 @@ def triage(raw: bytes) -> None:
     except ValueError:
         return  # shown as a clean error
     run_checks(parsed)
-    find_origin(parsed)
+    from_email(parsed, find_origin(parsed))
     received_warnings(parsed)
 
 

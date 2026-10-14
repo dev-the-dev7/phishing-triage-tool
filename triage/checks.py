@@ -1,8 +1,9 @@
 """Runs every check on a parsed email. The report gets its list from here."""
 
+from .content import check_css_added_text, check_hidden_text, check_image_only
 from .headers import check_authentication, check_free_email, check_reply_to, check_return_path
 from .impersonation import check_brand_joined, check_display_name, check_lookalike
-from .links import check_link_mismatch
+from .links import check_link_mismatch, check_link_type
 from .models import Check, ParsedEmail
 
 
@@ -16,4 +17,9 @@ def run_checks(parsed: ParsedEmail) -> list[Check]:
         check_lookalike(parsed),
         check_brand_joined(parsed),
         check_link_mismatch(parsed),
+        check_link_type(parsed),
+        # Only listed when they find something
+        *check_hidden_text(parsed),
+        *check_image_only(parsed),
+        *check_css_added_text(parsed),
     ]

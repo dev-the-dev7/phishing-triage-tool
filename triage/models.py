@@ -15,6 +15,10 @@ class Address:
 class Link:
     href: str  # where the link actually goes
     text: str  # what the reader sees
+    full_text: str = ""  # every bit of text in the link, with the parts a browser hides
+    # Domains in the text with a tag in the middle (pay<b>pal</b>.com), where CSS the tool
+    # doesn't read could change what shows
+    split_domains: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -43,6 +47,11 @@ class Check:
     result: Result
     strength: Strength
     evidence: str
+    # What the result doesn't cover: something close to this check that it couldn't check, for
+    # the analyst to look at whatever the result says, or a pointer to a related check. Evidence
+    # is why the check got its result, and a caveat never is. When the check can't tell, the
+    # result is inconclusive, not a pass with a caveat.
+    caveats: list[str] = field(default_factory=list)
 
     def __post_init__(self):
         # Turns "flag" into Result.FLAG, and raises ValueError on a typo like "fail"
@@ -82,6 +91,21 @@ class ParsedEmail:
     dkim_signatures: list[str] = field(default_factory=list)  # topmost first
     text_body: str = ""
     html_body: str = ""
-    links: list[Link] = field(default_factory=list)
+    html_text: str = ""  # what the HTML shows, one line per block, without the hidden parts
+    hidden_in_words: list[str] = field(default_factory=list)  # hidden text found inside a shown word
+    css_added_text: list[str] = field(default_factory=list)  # text <style> blocks add (content: ".")
+    html_images: int = 0  # images the HTML shows
+    links: list[Link] = field(default_factory=list)  # in the HTML, then URLs written in the plain text
+    other_urls: list[str] = field(default_factory=list)  # what the HTML loads or sends a form to
     attachments: list[Attachment] = field(default_factory=list)
     parse_warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class Indicators:
+    # Each list in the order found, without repeats
+    urls: list[str] = field(default_factory=list)
+    domains: list[str] = field(default_factory=list)  # in the xn-- form DNS uses
+    ips: list[str] = field(default_factory=list)
+    emails: list[str] = field(default_factory=list)
+    hashes: list[str] = field(default_factory=list)  # MD5, SHA-1 or SHA-256, told apart by length

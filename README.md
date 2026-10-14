@@ -12,33 +12,39 @@ Work in progress. What works now, with `python -m triage path/to/email.eml`:
 - Checks on the sender: SPF, DKIM, and DMARC results, Reply-To, Return-Path, display name,
   and free webmail
 - Lookalike domains and brands joined to other words, in the sender and in links
-- Link text that shows one domain but goes to another
+- Link text that shows one domain but goes to another, and links that run a script or
+  open a file share or another program
+- Text hidden inside words, emails that are only an image, and text added by CSS
 - The server that handed the email to your provider, found from the Received headers
+- Indicators (URLs, domains, IPs, email addresses, hashes), defanged for sharing. From an
+  email, or from alert text with `python -m triage --text alert.txt` (`-` reads standard
+  input)
 
 Planned:
 
-- Indicators (URLs, domains, IPs, hashes) pulled from the email or from pasted alert text,
-  defanged for sharing
 - Optional reputation lookups with VirusTotal and AbuseIPDB, off unless asked for
 - A Markdown triage note and a JSON report, with findings sorted by strength
-- Automated tests
 
-The `--text`, `--out`, `--json`, and `--enrich` options are there, but stop with
-"not built yet".
+The `--out`, `--json`, and `--enrich` options are there, but stop with "not built yet".
 
 ## Design decisions
 
 ### Results and safety
 
-- **Evidence, not a verdict.** There's no phishing score. A weighted number would need
-  labeled data to calibrate, and the checks overlap: one lookalike domain like
-  `paypa1.com` trips the display name, lookalike, and link checks at once, so adding them
-  up counts the same fact three times. The tool lists what it found, and the analyst
-  decides.
+- **No phishing score or verdict.** A weighted number would need labeled data to
+  calibrate, and the checks overlap: one lookalike domain like `paypa1.com` trips the
+  display name, lookalike, and link checks at once, so adding them up counts the same fact
+  three times. The tool lists what it found, and the analyst decides.
 
-- **Every check ends as flag, pass, or inconclusive.** Inconclusive means the email didn't
-  have enough evidence either way, like a message with no DKIM signature. Each check has a
-  fixed strength (strong, medium, weak) that says how much it matters when it flags.
+- **Every check ends as flag, pass, or inconclusive.** Inconclusive means the check
+  couldn't tell either way, like DKIM on a message with no signature, or a link whose text
+  CSS could change. Each check has a fixed strength (strong, medium, weak) that says how
+  much it matters when it flags.
+
+- **A check can carry caveats:** something close to it that it couldn't check, or a
+  pointer to a related check. The analyst should look at them whatever the result is. A
+  caveat is never the reason for the result, which is what the evidence is for. When a
+  check can't tell, the result is inconclusive, not a pass with a caveat.
 
 - **Nothing in the email is opened.** Attachments are hashed in memory and never written
   to disk. HTML is read as text to pull out links, never rendered, so tracking pixels
@@ -95,16 +101,93 @@ The `--text`, `--out`, `--json`, and `--enrich` options are there, but stop with
   (`login.microsoftonline.com.evil.net`) is flagged too, which also covers real domains
   that don't contain the brand name.
 
-- **Links are read the way a browser reads them, not the way Python's URL parser does.**
-  The two disagree in ways phishers use. A browser treats `\` as `/`, so
+- **Links are read the way a browser reads them.** Python's URL parser disagrees with
+  browsers in ways phishers use. A browser treats `\` as `/`, so
   `http://evil.com\@paypal.com` goes to evil.com, while Python reads the host as
   paypal.com. Browsers also percent-decode the host and turn fullwidth letters and dots
   into plain ones, so `%70aypa1.com` and `ｐａｙｐａ１。com` both go to `paypa1.com`. They skip
   tabs and line breaks anywhere in a link (`h<tab>ttp:\\evil.com`) and invisible
   characters like the zero-width space in a host. The tool does the same before checking a
-  link. It also finds links the way a mail client shows them: the first `href` when a tag
-  has two, relative links resolved against a `<base href>`, and every HTML part a client
-  could display, not just the first.
+  link.
+
+- **Links are found the way a mail client shows them:** the first `href` when a tag has
+  two, relative links resolved against a `<base href>`, every HTML part a client could
+  display, not just the first, and URLs written out in a plain text part, which clients
+  make clickable. Links inside `<!--[if mso]>` are read too: every other client takes that
+  as a comment, but Outlook for Windows shows it, so a link can be there for Outlook users
+  only.
+
+- **A link's text is read with and without the parts a browser hides.**
+  `paypal<span style="font-size:0"> </span>.com` shows paypal.com, but read as written it's
+  "paypal .com", which isn't a domain, so a hidden space would make the link check pass.
+  The tool follows the common ways to hide text (`display:none`, the `hidden` attribute,
+  `visibility:hidden`, font size 0, opacity 0, `<template>`, and the inside of `<style>` or
+  `<script>`) and the tags a browser closes on its own, checked against Edge. It can't get
+  every case right without being a browser, so the link check reads the text both ways,
+  and a mistake either way can't hide a domain.
+
+- **Where CSS could change what a link shows, the tool says it can't tell instead of
+  guessing.** It reads a tag's own `style`, but not the rules in a `<style>` block.
+  Working those out means selectors, the cascade, and `@media`, and every rule handled
+  leaves another way around it. So it looks at the places CSS would have to work. A tag
+  in the middle of a domain in a link's text (`pay<b>pal</b>.com`, where hiding a space or
+  adding `.evil` changes what the reader sees) makes the link check inconclusive instead
+  of a pass, since a pass would promise more than the tool knows. A `<style>` block that
+  adds text to the page (`::before { content: "." }`) gets its own content check, like an
+  image-only email, since in both the reader sees text the tool can't read. Legitimate
+  email rarely does either. The link's real address isn't affected, so the lookalike and
+  link type checks still see it.
+
+- **Links that don't open a web page or an email are flagged**, checked against a short
+  list of safe link types (`https:`, `mailto:`, `tel:`) rather than a list of bad ones,
+  so a new trick isn't missed. That covers `javascript:`, `data:` pages, `file:` and
+  `\\server\share` file shares, and Windows programs like `search-ms:` and
+  `ms-appinstaller:`, which phishing has used to run malware. Outlook for Windows opens a
+  file share link over SMB, and Windows can send the reader's sign-in hash to that server.
+
+- **Numeric hosts are read as the IP the browser goes to.** `http://3627734532/`,
+  `http://0xd83ad604/`, and `http://0330.072.0326.04/` all open 216.58.214.4. Python's
+  `ipaddress` refuses these forms, so without this the host would be listed as an odd
+  domain and an IP lookup would miss it.
+
+### Content
+
+- **Hidden text is only flagged inside a word.** `Mic<span style="font-size:0">xyz</span>rosoft`
+  shows Microsoft to the reader while a filter reads "Micxyzrosoft" (the ZeroFont trick).
+  Hidden text on its own isn't flagged, because nearly every marketing email hides a
+  preview line at the top for the inbox list.
+
+- **An email that's only an image is flagged**, since text in a picture or a QR code can't
+  be read by filters or by this tool. **Text added by CSS** is flagged for the same reason,
+  but only as weak, since templates add small decorations that way too. Icon fonts,
+  empty `content: ""`, and images (`content: url(...)`, which email trackers use) aren't
+  counted, since they add nothing that reads.
+
+- **These content checks only appear when they find something.** An email with no hidden
+  text isn't safer for it, so a pass would read as reassurance the check can't give.
+  There's no check on wording like "urgent" or "verify your account": real work email is
+  full of it, so it would flag half the inbox, and a pass for calm wording would be false
+  comfort.
+
+### Indicators
+
+- **From an email, only what it links to, loads, or came from is listed.** That's its
+  links, images and form targets, URLs written in the plain text part, the sender
+  addresses, the origin IP, and attachment hashes. Phishing names the real brand's domain
+  to look genuine ("log in at paypal.com"), so a domain or IP that's only mentioned in the
+  text isn't listed, since blocking it would be a mistake. Neither is a URL written as a
+  link's text, which is only what the link shows. Alert text is different: tools and
+  analysts write bare domains, IPs, and hashes there, so those count.
+
+- **Indicators are defanged on the way out and refanged on the way in.**
+  `hxxps://evil[.]com` can't turn into a live link when pasted into a ticket or a chat.
+  Alert text often arrives defanged already, so `[.]`, `(dot)`, `[@]`, and `hxxp` are
+  turned back before searching it.
+
+- **URLs and domains are listed the way the browser asks for them**, with the host in the
+  `xn--` form that DNS, proxy logs, and blocklists use. `http://%70aypa1.com/` is listed as
+  `http://paypa1.com/`, and `http://3627734532/` as `http://216.58.214.4/`. Defanged, a
+  Cyrillic `pаypal[.]com` looks just like the real one, and `xn--pypal-4ve[.]com` doesn't.
 
 ## Limitations
 
@@ -215,3 +298,42 @@ The `--text`, `--out`, `--json`, and `--enrich` options are there, but stop with
   and DMARC. Links through a brand's own redirect (`l.facebook.com/l.php?u=`,
   `linkedin.com/slink`) look like they go to the brand. The evidence there is where the
   links end up.
+
+### Content
+
+- **Only hiding done in a tag's own `style` is seen.** Text hidden by a rule in a `<style>`
+  block (`.x {display:none}`), by its color matching the background, by positioning it off
+  screen, or by a zero height is read as shown, and so is a value a browser skips as
+  invalid (`display:none; display:x` is still `none`). Hidden letters in a link's text are
+  still caught, since the link check reads every bit of it, but a hidden space,
+  punctuation mark, or line break splits the domain: `paypal<span class="x"> </span>.com`
+  reads as "paypal .com", which isn't a domain, so the link check can't flag it. It shows
+  inconclusive instead, naming the tag in the middle of paypal.com, so the analyst knows
+  to look.
+
+- **A stylesheet the email loads (`<link rel="stylesheet">`, `@import`) isn't read**,
+  since the tool never fetches anything, so text it adds isn't flagged as Text added by
+  CSS. Some mail clients load one, and most block it.
+
+- **A domain at the end of a line in a link, with a word at the start of the next, makes
+  the link check inconclusive.** `example.com<br>Sign in` is read across the tag as
+  `example.comsign`, since CSS can hide a `<br>` or a block and join the text around it,
+  and the tool can't tell that `comsign` isn't a real ending for a domain.
+
+- **An image with a line of text next to it isn't flagged**, and that's what most QR code
+  phishing looks like ("Scan to review your document"). The tool doesn't read images or
+  QR codes.
+
+### Indicators
+
+- **The list is what the email contains, not what's safe to block.** Phishing often links
+  to the real brand's site too (a footer link to `paypal.com`), and those are listed with
+  the rest. The analyst picks what to block.
+
+- **Some URLs in an email aren't listed:** URLs in CSS (`background: url(...)`), and a URL
+  written as plain text in an HTML part, which some clients make clickable.
+
+- **Alert text is read by pattern, so some text reads as an indicator when it isn't.**
+  Words joined by a dot (`Thanks.Regards`) and file names that end in a real TLD
+  (`script.py`, `invoice.zip`) read as domains, unless they're in a path
+  (`C:\Temp\script.py`), and a version number like `1.2.3.4` reads as an IP.

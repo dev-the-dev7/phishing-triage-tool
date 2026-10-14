@@ -8,6 +8,7 @@ import pytest
 from triage.checks import run_checks
 from triage.headers import check_authentication
 from triage.impersonation import check_brand_joined, check_lookalike
+from triage.iocs import from_email, from_text
 from triage.models import Link, ParsedEmail
 from triage.parser import parse_bytes
 from triage.received import find_origin, received_warnings
@@ -19,8 +20,8 @@ def seconds(task) -> float:
     return time.perf_counter() - start
 
 
-# Four slowdowns found while building the checks. Each took minutes on input like this, and
-# takes milliseconds now, so a one-second limit leaves plenty of room on a slow machine.
+# Input that made the tool take minutes while it was being built, or that could. Each runs in
+# milliseconds now, so a one-second limit leaves plenty of room on a slow machine.
 
 def test_long_run_of_spaces_in_received():
     # \s+ next to .*? in the from ... by pattern tried every split of the spaces
@@ -48,6 +49,35 @@ def test_many_bases_and_links():
     assert seconds(lambda: run_checks(parse_bytes(raw))) < 1
 
 
+def test_thousands_of_open_elements():
+    # Finding the element an end tag closes, or one a new tag ends, would search every open
+    # element each time
+    html = "<span>" * 10_000 + "<p>x<li>" * 10_000 + "</b>" * 10_000
+    raw = ("From: a@example.org\r\nContent-Type: text/html\r\n\r\n" + html).encode()
+    assert seconds(lambda: run_checks(parse_bytes(raw))) < 1
+
+
+def test_unclosed_outlook_parts():
+    # Python reads an unclosed comment as running to the end, so an early version that read
+    # each Outlook part again on its own read the rest of the email once per part
+    raw = ("From: a@example.org\r\nContent-Type: text/html\r\n\r\n" + "<!--[if mso]>" * 150_000).encode()
+    assert seconds(lambda: parse_bytes(raw)) < 1
+
+
+def test_long_style_block_and_link_text():
+    # Every content: in the CSS is read, and every tag in a link's text marks a place to look
+    css = "<style>" + r".x::before{content:'\2e'}" * 10_000 + "content:" * 10_000 + "</style>"
+    link = '<a href="https://evil.com/">' + "pay<b>pal</b>.com " * 10_000 + "</a>"
+    raw = ("From: a@example.org\r\nContent-Type: text/html\r\n\r\n" + css + link).encode()
+    assert seconds(lambda: parse_bytes(raw)) < 1
+
+
+def test_long_run_of_spaces_in_alert_text():
+    # Defanged brackets can have spaces in front (evil [.] com), and trying every space in the
+    # run as the start was quadratic
+    assert seconds(lambda: from_text("a" + " " * 200_000 + "b")) < 1
+
+
 # The full sweep puts each pattern in every field the sender controls, at two sizes. Code
 # that keeps up with the input takes about twice as long for twice the input. Four times
 # means it's quadratic, and that becomes minutes on a larger email.
@@ -55,7 +85,8 @@ def test_many_bases_and_links():
 UNITS = [
     "( ", "(a", "x(", "( [", "(a [", "[1", "[1.1", "a.", "a-", "-.", "1.", ". ", "a ", "\t",
     "from by ", "by ", "=", ";", ";l=", "header.d=", "=?utf-8?q?a?=", "\\", '"', '"\\', "/\\",
-    "a\\@", "%7", "&#9;", "rn", "c1", "a,", "<a", "@", ":",
+    "a\\@", "%7", "&#9;", "rn", "c1", "a,", "<a", "@", ":", "<p>", "<li>", "<td>", "</b>", "<i hidden>", "a.<br>",
+    '<i style="font-size:0">x', "/*", "<!--[if mso]><a>", "<![endif]-->",
     "\N{FULLWIDTH LATIN SMALL LETTER P}", "\N{IDEOGRAPHIC FULL STOP}",
 ]
 
@@ -77,7 +108,7 @@ def crafted_email(unit: str, length: int) -> bytes:
 def triage(raw: bytes) -> None:
     parsed = parse_bytes(raw)
     run_checks(parsed)
-    find_origin(parsed)
+    from_email(parsed, find_origin(parsed))
     received_warnings(parsed)
 
 
@@ -87,4 +118,17 @@ def test_time_grows_with_the_input(unit):
     small = seconds(lambda: triage(crafted_email(unit, 20_000)))
     large = seconds(lambda: triage(crafted_email(unit, 40_000)))
     # The added 0.1 seconds covers timer noise on the quick ones
+    assert large < 3 * small + 0.1
+
+
+# Alert text goes through other patterns: defanged brackets, addresses, IPs and hashes
+TEXT_UNITS = UNITS + [" ", "[", "[ ", " [.", "(dot", "hxx", "h**ps", "a@", "a@b", "@a.", "1.1.", "1:",
+                      "::", "a:", "0a", "www.", "https://", "\\."]
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("unit", TEXT_UNITS)
+def test_alert_text_time_grows_with_the_input(unit):
+    small = seconds(lambda: from_text((unit * 100_000)[:100_000]))
+    large = seconds(lambda: from_text((unit * 200_000)[:200_000]))
     assert large < 3 * small + 0.1

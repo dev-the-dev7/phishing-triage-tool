@@ -4,7 +4,7 @@ that shows one domain but goes to another (links.py)."""
 import pytest
 
 from triage import parser
-from triage.links import check_link_mismatch
+from triage.links import check_link_mismatch, check_link_type
 from triage.models import Link, ParsedEmail, Result
 from triage.parser import parse_bytes
 
@@ -117,15 +117,15 @@ def test_every_html_part_is_read():
     assert links_in(mixed) == [("https://paypa1.com/", "paypal.com")]
 
 
-@pytest.mark.parametrize("content_type, hrefs", [
+@pytest.mark.parametrize("content_type, text", [
     # MIME types ignore case (RFC 2045), so mail clients show this as HTML
-    ("TEXT/HTML", ["https://evil.com/"]),
-    # Shown as written, so evil.com is on screen and the text hides nothing
-    ("text/plain", []),
+    ("TEXT/HTML", "paypal.com"),
+    # Shown as written, so the URL is on screen and the text hides nothing
+    ("text/plain", "https://evil.com/"),
 ])
-def test_content_type_decides_what_is_html(content_type, hrefs):
+def test_content_type_decides_what_is_html(content_type, text):
     raw = HEADERS + f"Content-Type: {content_type}\r\n\r\n" + '<a href="https://evil.com/">paypal.com</a>'
-    assert [link.href for link in parse_bytes(raw.encode()).links] == hrefs
+    assert links_in(parse_bytes(raw.encode())) == [("https://evil.com/", text)]
 
 
 def test_empty_html_part():
@@ -165,6 +165,141 @@ def test_tag_spellings_browsers_accept(html):
     assert links_in(html_email(html)) == [("https://evil.com/", "x")]
 
 
+def test_links_only_outlook_shows():
+    # Outlook for Windows shows what's in <!--[if mso]>, and draws <v:roundrect href> as a button.
+    # Other clients read it all as a comment.
+    parsed = html_email('<p>Hi</p><!--[if mso]><a href="https://evil.com/">paypal.com</a><![endif]-->'
+                        '<!--[if gte mso 9]><v:roundrect href="https://evil.net/x"><center>Sign in</center>'
+                        '</v:roundrect><img src="https://evil.org/p.gif"><![endif]-->'
+                        "<!--[if !mso]><!--><a href=\"https://shown.com/\">shown</a><!--<![endif]-->"
+                        '<!-- <a href="https://not-a-link.com/">x</a> -->')
+    # The links every client shows, then the ones only Outlook does
+    assert links_in(parsed) == [("https://shown.com/", "shown"), ("https://evil.com/", "paypal.com"),
+                                ("https://evil.net/x", "")]
+    assert parsed.other_urls == ["https://evil.org/p.gif"]
+    assert parsed.html_text == "Hi\nshown"
+    assert check_link_mismatch(parsed).evidence == "text shows paypal.com but goes to evil.com"
+
+
+@pytest.mark.parametrize("other_clients_only", [
+    # The parts every client but Outlook shows, written the two ways templates write them
+    '<!--[if !mso]><!--><a href="https://shown.com/">shown</a><!--<![endif]-->',
+    '<!--[if !mso]><!-- --><a href="https://shown.com/">shown</a><!-- <![endif]-->',
+])
+def test_outlook_link_after_a_part_outlook_skips(other_clients_only):
+    parsed = html_email(other_clients_only + '<p>x</p><!--[if mso]><a href="https://evil.com/">paypal.com</a>'
+                                             "<![endif]-->")
+    assert links_in(parsed) == [("https://shown.com/", "shown"), ("https://evil.com/", "paypal.com")]
+
+
+def test_link_split_across_outlook_parts():
+    # Outlook sees <a href="https://evil.com/">paypal.com</a>, and other clients see plain text
+    parsed = html_email('<!--[if mso]><a href="https://evil.com/"><![endif]-->paypal.com'
+                        "<!--[IF MSO]></a><![endif]-->")
+    assert links_in(parsed) == [("https://evil.com/", "paypal.com")]
+    assert check_link_mismatch(parsed).evidence == "text shows paypal.com but goes to evil.com"
+
+
+def test_image_map_area_is_a_link():
+    # A clickable part of an image, with no text of its own. An open <a> around it carries on.
+    parsed = html_email('<a href="https://one.com/">one<map><area href="https://evil.com/"></map> more</a>'
+                        "<area alt=x>")
+    assert links_in(parsed) == [("https://evil.com/", ""), ("https://one.com/", "one more")]
+
+
+@pytest.mark.parametrize("html", [
+    '<img src="https://evil.com/x">',
+    '<form action="https://evil.com/x"><input name=password></form>',
+    '<button formaction="https://evil.com/x">Sign in</button>',
+    '<td background="https://evil.com/x">',
+    '<video poster="https://evil.com/x"></video>',
+    '<link rel=stylesheet href="https://evil.com/x">',
+    '<svg><image xlink:href="https://evil.com/x"/></svg>',
+    # Read like a link: trimmed, and against the <base>
+    '<img src=" https://evil.com/x ">',
+    '<base href="https://evil.com/"><img src="/x">',
+])
+def test_other_urls_the_html_loads_or_sends_to(html):
+    parsed = html_email(html)
+    assert parsed.other_urls == ["https://evil.com/x"]
+    assert parsed.links == []
+
+
+def test_urls_written_in_plain_text_are_links():
+    parsed = parse_bytes((HEADERS + "Content-Type: text/plain\r\n\r\n"
+                          "Sign in at https://paypa1.com/login. Or www.evil.com/x, not hxxps://evil[.]com").encode())
+    # A www. link with no scheme opens as http
+    assert links_in(parsed) == [("https://paypa1.com/login", "https://paypa1.com/login"),
+                                ("http://www.evil.com/x", "www.evil.com/x")]
+
+
+def test_plain_text_url_with_a_login_part():
+    # The reader sees paypal.com at the start, and the browser goes to evil.com
+    parsed = parse_bytes((HEADERS + "\r\nhttps://paypal.com@evil.com/login").encode())
+    assert check_link_mismatch(parsed).evidence == "text shows paypal.com but goes to evil.com"
+
+
+@pytest.mark.parametrize("href, text", [
+    # A URL in the text is only read up to its path, where login.aspx isn't a site
+    ("http://10.0.0.5/app/login.aspx", "http://10.0.0.5/app/login.aspx"),
+    ("https://evil.com/", "See https://evil.com/files/paypal.com.html today"),
+    ("https://evil.com/", r"https://evil.com\paypal.com"),
+])
+def test_url_in_the_text_is_read_up_to_its_path(href, text):
+    assert mismatch(href, text).result == Result.PASS
+
+
+@pytest.mark.parametrize("href, evidence", [
+    ("javascript:alert(1)", "javascript:alert(1) runs a script"),
+    ("JavaScript:alert(1)", "JavaScript:alert(1) runs a script"),
+    # Browsers drop tabs and line breaks in a link, so this still runs
+    ("java&#9;script:alert(1)", "java\tscript:alert(1) runs a script"),
+    ("vbscript:msgbox", "vbscript:msgbox runs a script"),
+    ("data:text/html,<script>x</script>", "data:text/html,<script>x</script> holds a whole page or file inside "
+     "the link"),
+    ("data:image/png;base64,AAAA", "data:image/png;base64,AAAA holds a whole page or file inside the link"),
+    ("data:text/html;base64," + "A" * 100, "data:text/html;base64,AAAAAAAAAAAAAAAAAA... holds a whole page or "
+     "file inside the link"),
+    ("file://evil.com/share/x.exe", "file://evil.com/share/x.exe opens a file or a file share"),
+    (r"\\evil.com\share", r"\\evil.com\share opens a file share in Outlook for Windows"),
+    ("\\&#9;\\evil.com\\share", "\\\t\\evil.com\\share opens a file share in Outlook for Windows"),
+    (r"C:\Users\Public\x.exe", r"C:\Users\Public\x.exe opens a file on the reader's computer"),
+    # Any other link type opens a program. Phishing has used these two to run malware.
+    ("search-ms:query=invoice", "search-ms:query=invoice opens another program, not a web page"),
+    ("ms-appinstaller:?source=https://e.com/x", "ms-appinstaller:?source=https://e.com/x opens another program, "
+     "not a web page"),
+])
+def test_script_file_or_app_link_flags(href, evidence):
+    check = check_link_type(html_email(f'<a href="{href}">Open</a>'))
+    assert (check.result, check.evidence) == (Result.FLAG, evidence)
+
+
+def test_the_same_link_is_listed_once():
+    check = check_link_type(html_email('<a href="javascript:x()">a</a>' * 3))
+    assert check.evidence == "javascript:x() runs a script"
+
+
+def test_script_or_file_url_the_html_loads_flags():
+    check = check_link_type(html_email('<form action="javascript:steal()"><img src="file://evil.com/x.png">'))
+    assert check.evidence == "javascript:steal() runs a script; file://evil.com/x.png opens a file or a file share"
+
+
+def test_web_mail_and_inline_image_links_pass():
+    # Images often come inline as data: URLs, or as an attached part (cid:). Apple Mail adds
+    # x-apple-data-detectors: links around dates and addresses.
+    parsed = html_email('<a href="https://x.com/">x</a><a href="mailto:a@x.com">a</a><a href="/x">x</a>'
+                        '<a href="tel:+15550100">call</a><a href="sms:+15550100">text</a><a href="#top">top</a>'
+                        '<a href="x-apple-data-detectors://0">Tuesday</a><iframe src="about:blank"></iframe>'
+                        '<img src="data:image/png;base64,AAAA"><img src="cid:logo">')
+    check = check_link_type(parsed)
+    assert (check.result, check.evidence) == (Result.PASS, "Every link opens a web page or an email")
+
+
+def test_attributes_without_a_url_are_skipped():
+    parsed = html_email('<img src><img src=""><img src=" "><link href><p class="https://evil.com/">')
+    assert parsed.other_urls == []
+
+
 def test_unclosed_and_nested_links():
     assert links_in(html_email('<a href="https://evil.com/">paypal.com')) == [("https://evil.com/", "paypal.com")]
     # A new <a> ends the one before it
@@ -183,12 +318,207 @@ def test_link_text_is_what_shows_between_the_tags():
     assert links_in(parsed) == [("https://evil.com/", "paypal.com")]
 
 
-@pytest.mark.parametrize("hidden", ["<style> </style>", "<span hidden> </span>", '<span style="display:none"> </span>'])
-@pytest.mark.xfail(reason="README limitation: text hidden inside a link is still read", raises=AssertionError)
-def test_text_hidden_inside_a_link(hidden):
-    # The reader sees paypal.com, and the tool reads "paypal .com", which isn't a domain
+@pytest.mark.parametrize("element", ["style", "script", "title", "iframe", "noembed", "noframes"])
+def test_text_inside_an_element_browsers_dont_show_isnt_link_text(element):
+    # The reader sees paypal.com. Reading the space inside would give "paypal .com", which isn't a domain.
+    parsed = html_email(f'<a href="https://evil.com/">paypal<{element}> x </{element}>.com</a>')
+    assert links_in(parsed) == [("https://evil.com/", "paypal.com")]
+
+
+@pytest.mark.parametrize("hidden", [
+    "<template> x </template>",
+    "<span hidden> x </span>",
+    '<span style="display:none"> x </span>',
+    '<span style="visibility:hidden"> x </span>',
+    '<span style="font-size:0"> x </span>',
+    '<span style="font-size:0.0pt"> x </span>',
+    '<span style="opacity:0"> x </span>',
+    # Read the way CSS reads it: any case, comments, spaces, !important, and the last value wins
+    '<span style="DISPLAY : None !important"> x </span>',
+    '<span style="display:/* x */none"> x </span>',
+    '<span style="display:block; display:none"> x </span>',
+    '<span style="display:none !important; display:block"> x </span>',
+    # Browsers ignore the / and leave the span open until </span>
+    "<span hidden/> x </span>",
+    # Inside a shown element inside a hidden one
+    "<span hidden><b> x </b></span>",
+    # Font size scales from the parent's, so a zero stays zero
+    '<span style="font-size:0"><b style="font-size:2em"> x </b></span>',
+])
+def test_text_a_browser_hides_isnt_link_text(hidden):
     parsed = html_email(f'<a href="https://evil.com/">paypal{hidden}.com</a>')
-    assert check_link_mismatch(parsed).result == Result.FLAG
+    assert links_in(parsed) == [("https://evil.com/", "paypal.com")]
+    assert check_link_mismatch(parsed).evidence == "text shows paypal.com but goes to evil.com"
+
+
+@pytest.mark.parametrize("shown", [
+    # The hidden attribute works through display, so setting display shows it again
+    '<span hidden style="display:inline">x</span>',
+    # A child can set visibility and font size back
+    '<span style="visibility:hidden"><b style="visibility:visible">x</b></span>',
+    '<span style="font-size:0"><b style="font-size:14px">x</b></span>',
+    # Text after a hidden element is shown. In <svg>, the / does close an element.
+    "<span hidden></span>x",
+    '<svg><g style="display:none"/><text>x</text></svg>',
+    # Not hidden
+    '<span style="font-size:0.5px; opacity:0.5; display:inline">x</span>',
+])
+def test_text_a_browser_shows_is_link_text(shown):
+    assert links_in(html_email(f'<a href="https://evil.com/">{shown}</a>')) == [("https://evil.com/", "x")]
+
+
+@pytest.mark.parametrize("hidden", [
+    # A rule in a <style> block, which the tool doesn't read
+    '<style>.h{display:none}</style><a href="https://evil.com/">paypal<span class="h"> </span>.com</a>',
+    # A second value browsers skip because it isn't valid, which the tool takes as the value
+    '<a href="https://evil.com/">paypal<span style="display:none;display:x"> </span>.com</a>',
+])
+@pytest.mark.xfail(reason="README limitation: a space hidden by CSS the tool doesn't read splits the domain",
+                   raises=AssertionError)
+def test_space_hidden_by_css_the_tool_doesnt_read(hidden):
+    assert check_link_mismatch(html_email(hidden)).result == Result.FLAG
+
+
+@pytest.mark.parametrize("text, domain", [
+    ("pay<b>pal</b>.com", "paypal.com"),
+    ("paypal<b>.</b>com", "paypal.com"),
+    ("www.<b>paypal</b>.com", "www.paypal.com"),
+    # Also read without a tag that holds only spaces or punctuation, since hiding that splits it
+    ("paypal<span><i> </i></span>.com", "paypal.com"),
+])
+def test_tag_in_the_middle_of_a_domain(text, domain):
+    assert html_email(f'<a href="https://x.com/">{text}</a>').links[0].split_domains == [domain]
+
+
+@pytest.mark.parametrize("text", [
+    # A domain inside one tag's text, or tags only around it
+    "<span>paypal.com</span>",
+    "<b>Sign in</b> to <b>example.com</b>",
+    '<img src="cid:logo"> paypal.com <b>now</b>',
+    # What's in <style> isn't shown, and the tool reads that
+    "paypal<style>x</style>.com",
+    # CSS can't make a <wbr> show anything
+    "https://www.<wbr>paypal.<wbr>com/<wbr>signin",
+    # No domain at all
+    "<b>Sign</b> <i>in</i>",
+])
+def test_tags_around_a_domain(text):
+    assert html_email(f'<a href="https://x.com/">{text}</a>').links[0].split_domains == []
+
+
+@pytest.mark.parametrize("text", [
+    "example.com<br>Sign in",
+    # Browsers read </br> as <br>
+    "example.com</br>Sign in",
+    "<div>example.com</div><div>Sign in</div>",
+    "<table><tr><td>example.com</td><td>Sign in</td></tr></table>",
+])
+def test_a_line_break_or_block_in_a_link_is_a_space(text):
+    # A browser shows the text on either side on its own line or in its own cell. Read as
+    # "example.comSign in", the text would show a domain the link doesn't go to.
+    parsed = html_email(f'<a href="https://example.com/">{text}</a>')
+    assert [(link.text, link.full_text) for link in parsed.links] == [("example.com Sign in", "example.com Sign in")]
+
+
+def test_a_hidden_block_only_splits_the_text_read_with_the_hidden_parts():
+    # A block that's gone takes up no line, so the reader sees the text on either side joined
+    link, = html_email('<a href="https://evil.com/">pay<div hidden>x</div>pal.com</a>').links
+    assert (link.text, link.full_text) == ("paypal.com", "pay x pal.com")
+
+
+@pytest.mark.parametrize("text", ["example.com<br>Sign in", "<div>example.com</div><div>Sign in</div>"])
+@pytest.mark.xfail(reason="README limitation: a domain at the end of a line and a word at the start of the next "
+                          "read as one domain across the tag", raises=AssertionError)
+def test_a_domain_at_the_end_of_a_line_in_a_link(text):
+    assert check_link_mismatch(html_email(f'<a href="https://example.com/">{text}</a>')).result == Result.PASS
+
+
+@pytest.mark.parametrize("href", ["mailto:x@evil.com", "javascript:void(0)"])
+def test_a_tag_in_a_domain_in_a_link_with_no_host(href):
+    # The text can't be compared with a site the link doesn't go to, split or not
+    check = check_link_mismatch(html_email(f'<a href="{href}">support@pay<b>pal</b>.com</a>'))
+    assert check.result == Result.PASS
+
+
+@pytest.mark.parametrize("text, domain", [
+    # The two in test_space_hidden_by_css_the_tool_doesnt_read, which the link check can't flag
+    ('<style>.h{display:none}</style>paypal<span class="h"> </span>.com', "paypal.com"),
+    ('paypal<span style="display:none;display:x"> </span>.com', "paypal.com"),
+    # Hidden by CSS, .evil makes the text match where the link goes
+    ('paypal<span class="h">.evil</span>.com', "paypal.evil.com"),
+    # A <br> hidden by CSS joins the lines, like a hidden space
+    ('<style>.h{display:none}</style>paypal<br class="h">.com', "paypal.com"),
+])
+def test_tag_in_the_middle_of_a_domain_makes_the_link_check_inconclusive(text, domain):
+    # The tool can't tell what the reader sees there, so it doesn't pass
+    check = check_link_mismatch(html_email(f'<a href="https://evil.com/">{text}</a>'))
+    assert (check.result, check.evidence) == (
+        Result.INCONCLUSIVE, f"A tag sits in the middle of {domain} in a link to evil.com, where CSS could change "
+                             "what shows. Look at how the link shows.")
+
+
+def test_a_mismatch_still_flags_and_each_split_is_listed_once():
+    split = '<a href="https://evil.com/">paypal<i> </i>.com</a>'
+    check = check_link_mismatch(html_email(split * 2 + '<a href="https://evil.net/">paypal<b> </b>.com</a>'))
+    assert check.evidence == ("A tag sits in the middle of paypal.com in a link to evil.com; paypal.com in a link "
+                              "to evil.net, where CSS could change what shows. Look at how the link shows.")
+    assert check.caveats == []
+    # With a mismatch too, the check flags, and the split is kept as a caveat
+    check = check_link_mismatch(html_email(split + '<a href="https://evil.net/">paypal.com</a>'))
+    assert (check.result, check.evidence) == (Result.FLAG, "text shows paypal.com but goes to evil.net")
+    assert check.caveats == ["A tag sits in the middle of paypal.com in a link to evil.com, where CSS could change "
+                           "what shows. Look at how the link shows."]
+
+
+CSS_CAVEAT = ('CSS adds text to what the email shows, so a link can show more than the tool reads. '
+            'See "Text added by CSS".')
+
+
+@pytest.mark.parametrize("links, result", [
+    ('<a href="https://paypal.com/">paypal.com</a>', Result.PASS),
+    ('<a href="https://evil.com/">paypal.com</a>', Result.FLAG),
+    ('<a href="https://evil.com/">paypal<i> </i>.com</a>', Result.INCONCLUSIVE),
+])
+def test_css_that_adds_text_is_a_caveat_on_the_link_check(links, result):
+    # Whatever the result, a link could show more than the tool reads
+    check = check_link_mismatch(html_email('<style>.x::before{content:"."}</style>' + links))
+    assert (check.result, check.caveats[-1]) == (result, CSS_CAVEAT)
+
+
+def test_text_is_read_with_and_without_the_hidden_parts():
+    # If the tool took shown text for hidden, reading the hidden parts too still finds the domain
+    check = check_link_mismatch(ParsedEmail(links=[Link("https://evil.com/", "", "paypal.com")]))
+    assert check.evidence == "text shows paypal.com but goes to evil.com"
+    # The full text is only read when what shows doesn't find a mismatch
+    check = check_link_mismatch(ParsedEmail(links=[Link("https://evil.com/", "paypal.com", "paypalx.com")]))
+    assert check.evidence == "text shows paypal.com but goes to evil.com"
+
+
+@pytest.mark.parametrize("html, text", [
+    # A browser ends an open element at these tags, so the hidden one doesn't carry on
+    ("<p hidden>x<p>shown", "shown"),
+    ("<p hidden>x<div>shown", "shown"),
+    ("<ul><li hidden>x<li>shown</ul>", "shown"),
+    ("<dl><dt hidden>x<dd>shown</dl>", "shown"),
+    ("<table><tr><td hidden>x<td>shown</table>", "shown"),
+    ("<table><tr hidden><td>x<tr><td>shown</table>", "shown"),
+    ("<select><option hidden>x<option>shown</select>", "shown"),
+    ("<h1 hidden>x<h2>shown</h2>", "shown"),
+    # An end tag closes what's open inside its element. One with nothing to close is skipped.
+    ("<div><span hidden>x</div>shown", "shown"),
+    ("<span hidden>x</b>y</span>shown", "shown"),
+    # But not past a button or a list opened inside it
+    ("<p hidden><button><p>x</button></p>shown", "shown"),
+    ("<ul><li hidden><ul><li>x</ul></ul>shown", "shown"),
+    # Text or a tag put straight into a table is moved in front of it, so a hidden table
+    # doesn't hide it. What's in a cell stays hidden, and so does text in a hidden element
+    # around the table.
+    ('<table style="display:none">shown<tr><td>x</td></tr></table>', "shown"),
+    ('<table style="display:none"><tr><span>shown</span><td>x</table>', "shown"),
+    ('<div hidden><table>x</table></div>shown', "shown"),
+])
+def test_elements_a_browser_ends_without_an_end_tag(html, text):
+    assert html_email(html).html_text == text
 
 
 @pytest.mark.parametrize("html, href", [
@@ -266,14 +596,14 @@ def test_no_break_space_before_a_link_isnt_trimmed():
 def test_html_that_cant_be_parsed_keeps_the_links_before_it(monkeypatch):
     # Python's HTML parser no longer raises on broken markup like <![, so the test raises an
     # error at the <b> inside the second link. That link is kept with its text so far.
-    read_tag = parser._LinkCollector.handle_starttag
+    read_tag = parser._HTMLCollector.handle_starttag
 
     def fail_at_bold(self, tag, attrs):
         if tag == "b":
             raise ValueError("broken markup")
         read_tag(self, tag, attrs)
 
-    monkeypatch.setattr(parser._LinkCollector, "handle_starttag", fail_at_bold)
+    monkeypatch.setattr(parser._HTMLCollector, "handle_starttag", fail_at_bold)
     parsed = html_email('<a href="https://one.com/">one</a><a href="https://two.com/">two <b>bold</b></a>'
                         '<a href="https://three.com/">three</a>')
     assert links_in(parsed) == [("https://one.com/", "one"), ("https://two.com/", "two")]

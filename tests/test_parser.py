@@ -78,12 +78,24 @@ def test_header_length_limit():
         parse("From: a@example.org", f"Content-Type: {at_limit}a")
 
 
-@pytest.mark.parametrize("name", ["Date", "Message-ID"])
-def test_long_date_or_message_id_only_warns(name):
-    parsed = parse("From: a@example.org", f"{name}: <" + "a" * 5_000 + "@example.org>")
-    assert f"{name} header couldn't be parsed (ValueError)" in parsed.parse_warnings
-    assert (parsed.date, parsed.message_id) == ("", "")
+def test_long_date_only_warns():
+    parsed = parse("From: a@example.org", "Date: <" + "a" * 5_000 + "@example.org>")
+    assert parsed.parse_warnings == ["Date header couldn't be parsed (ValueError)"]
+    assert parsed.date == ""
     assert parsed.from_addr.email == "a@example.org"
+
+
+@pytest.mark.parametrize("message_id", [
+    # Searching the mail logs needs it exactly, so encoded text isn't decoded
+    "=?utf-8?q?<x=40evil.com>?=",
+    # The library doesn't parse it, so its length and nested comments don't matter
+    "<" + "a" * 5_000 + "@example.org>",
+    "(a" * 1_000,
+])
+def test_message_id_is_read_as_written(message_id):
+    parsed = parse("From: a@example.org", f"Message-ID: {message_id}")
+    assert parsed.message_id == message_id
+    assert parsed.parse_warnings == []
 
 
 def test_long_file_name_in_a_real_email_parses():
@@ -139,11 +151,6 @@ def test_deeply_nested_parts_are_refused(content_type):
 def test_deeply_nested_comments_in_content_type_are_refused():
     with pytest.raises(ValueError, match="nested too deeply"):
         parse("From: a@example.org", "Content-Type: text/html; " + "(a" * 1_000)
-
-
-def test_deeply_nested_comments_in_message_id_only_warn():
-    parsed = parse("From: a@example.org", "Message-ID: " + "(a" * 1_000)
-    assert "Message-ID header couldn't be parsed (RecursionError)" in parsed.parse_warnings
 
 
 @pytest.mark.parametrize("subject, expected", [

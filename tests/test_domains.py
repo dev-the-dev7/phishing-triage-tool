@@ -4,8 +4,8 @@ import unicodedata
 
 import pytest
 
-from triage.domains import (LOOKALIKE_CHARS, base_domain, decode_idn, lookalike_forms, normalize_unicode,
-                            registered_name, unmask_lookalikes, url_host)
+from triage.domains import (LOOKALIKE_CHARS, ascii_domain, base_domain, decode_idn, domains_in_text,
+                            lookalike_forms, normalize_unicode, registered_name, unmask_lookalikes, url_host)
 
 
 def fullwidth(text: str) -> str:
@@ -69,6 +69,25 @@ BROWSER_HOSTS = [
     ("http://pay\N{WORD JOINER}pal.com/", "paypal.com"),
     ("http://pay\N{ZERO WIDTH NO-BREAK SPACE}pal.com/", "paypal.com"),
     ("http://pay\N{MONGOLIAN VOWEL SEPARATOR}pal.com/", "paypal.com"),
+    # A host that ends in a number is an IPv4 address. Each part can be decimal, hex or octal,
+    # and the last part fills the bytes that are left.
+    ("http://3627734532/", "216.58.214.4"),
+    ("http://0xd83ad604/", "216.58.214.4"),
+    ("http://0330.072.0326.04/", "216.58.214.4"),
+    ("http://216.58.54788/", "216.58.214.4"),
+    ("http://127.1/", "127.0.0.1"),
+    ("http://1.2.3/", "1.2.0.3"),
+    ("http://010.0.0.1/", "8.0.0.1"),
+    ("http://00000000000000001/", "0.0.0.1"),
+    ("http://0x00000000000000ff/", "0.0.0.255"),
+    ("http://0x/", "0.0.0.0"),
+    ("http://1.2.3.0x/", "1.2.3.0"),
+    ("http://4294967295/", "255.255.255.255"),
+    ("http://%31%32%37.1/", "127.0.0.1"),
+    (f"http://{fullwidth('0x7f')}.{fullwidth('1')}/", "127.0.0.1"),
+    # Not numbers, so a domain
+    ("http://0x1g/", "0x1g"),
+    ("http://1e3/", "1e3"),
 ]
 
 
@@ -80,6 +99,36 @@ def test_url_host_matches_the_browser(href, host):
 def test_url_host_drops_a_trailing_dot():
     # The browser keeps it (paypal.com.), but it's the same site in DNS
     assert url_host("http://paypal.com./") == "paypal.com"
+    assert url_host("http://1.2.3.4./") == "1.2.3.4"
+
+
+@pytest.mark.parametrize("host", ["08.1.1.1", "09", "1.2.3.4.5", "256.1.1.1", "1.2.3.256", "4294967296",
+                                  "1.16777216", "1.2.65536", "1..2", "example.123", "99999999999"])
+def test_numeric_host_a_browser_refuses_is_kept(host):
+    # The browser won't open these. The host is kept as written, so the link is still checked.
+    assert url_host(f"http://{host}/") == host
+
+
+def test_numeric_host_with_thousands_of_digits():
+    # Python refuses to read a decimal number this long, and the browser refuses the host
+    host = "1" * 5_000
+    assert url_host(f"http://{host}/") == host
+
+
+@pytest.mark.parametrize("domain, expected", [
+    ("p\N{CYRILLIC SMALL LETTER A}ypal.com", "xn--pypal-4ve.com"),
+    ("paypal.com", "paypal.com"),
+    # Kept as is when the encoder refuses it
+    ("a..com", "a..com"),
+    ("a" * 64 + ".com", "a" * 64 + ".com"),
+])
+def test_ascii_domain(domain, expected):
+    assert ascii_domain(domain) == expected
+
+
+def test_domains_in_text():
+    text = "Visit PayPal.com, or evil.net/login. Not setup.exe, invoice.pdf or 10.0.0.1. But invoice.zip is."
+    assert domains_in_text(text) == ["paypal.com", "evil.net", "invoice.zip"]
 
 
 @pytest.mark.parametrize("href", ["mailto:a@evil.com", "javascript:alert(1)", "", "http://"])

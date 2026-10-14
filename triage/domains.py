@@ -80,7 +80,67 @@ def url_host(url: str) -> str | None:
         return None
     if not name:
         return None
-    return normalize_unicode(unquote(name)).rstrip(".") or None
+    host = normalize_unicode(unquote(name)).rstrip(".")
+    return browser_ipv4(host) or host or None
+
+
+def browser_ipv4(host: str) -> str | None:
+    # Browsers read a host that ends in a number as an IPv4 address, in forms Python's ipaddress
+    # refuses. These all go to 216.58.214.4: http://3627734532/, http://0xd83ad604/,
+    # http://0330.072.0326.04/, http://216.58.54788/. Each part can be decimal, hex (0x) or
+    # octal (a leading 0), and the last part fills the bytes that are left (WHATWG URL standard).
+    # None when the host isn't one, or the browser would refuse it.
+    parts = host.split(".")
+    if not re.fullmatch(r"[0-9]+|0x[0-9a-f]*", parts[-1], re.I) or len(parts) > 4:
+        return None
+    numbers = []
+    for part in parts:
+        if re.fullmatch(r"0x[0-9a-f]*", part, re.I):
+            numbers.append(int(part[2:] or "0", 16))
+        elif re.fullmatch(r"0[0-7]+", part):
+            numbers.append(int(part, 8))
+        elif re.fullmatch(r"0|[1-9][0-9]{0,9}", part):
+            numbers.append(int(part))
+        else:
+            return None
+    *first, last = numbers
+    if any(number > 255 for number in first) or last >= 256 ** (5 - len(numbers)):
+        return None
+    return str(ipaddress.IPv4Address(sum(number << (8 * (3 - i)) for i, number in enumerate(first)) + last))
+
+
+def ascii_domain(domain: str) -> str:
+    # The xn-- form that DNS, proxy logs and blocklists use: pаypal.com with a Cyrillic а is
+    # xn--pypal-4ve.com. A domain the encoder refuses (an empty or overlong label) is kept as is.
+    try:
+        return domain.encode("idna").decode("ascii")
+    except UnicodeError:
+        return domain
+
+
+# File names like "invoice.pdf" look like domains. .zip and .mov are left out on purpose
+# because they're real TLDs that phishers use.
+FILE_EXTENSIONS = {"pdf", "doc", "docx", "docm", "xls", "xlsx", "xlsm", "ppt", "pptx", "htm", "html",
+                   "txt", "csv", "rtf", "png", "jpg", "jpeg", "gif", "svg", "exe", "dll", "msi", "bat",
+                   "cmd", "js", "vbs", "hta", "lnk", "scr", "jar", "iso", "img", "rar", "gz", "eml",
+                   "msg", "log", "tmp", "json", "xml"}
+
+
+# A URL written out in text, which mail clients make clickable. It runs to the next space,
+# quote or backtick (Markdown's `code`), and punctuation at the end is taken as the sentence's,
+# along with Markdown's *bold*.
+TEXT_URL = re.compile(r"(?<![\w.])(?:https?://|www\.)[^\s<>\"'`]+", re.I)
+
+
+def urls_in_text(text: str) -> list[str]:
+    return [m.group().rstrip(".,;:!?)]}*") for m in TEXT_URL.finditer(text)]
+
+
+def domains_in_text(text: str) -> list[str]:
+    # Domains written in text, normalized like a link's host. Any letters count ([^\W\d_]), not
+    # just a-z, so fullwidth or Cyrillic text that looks like paypal.com is still found.
+    found = re.finditer(r"(?<![\w.-])(?:[\w-]+\.)+([^\W\d_]{2,})(?![\w-])", normalize_unicode(text))
+    return [m.group(0) for m in found if m.group(1) not in FILE_EXTENSIONS]
 
 
 def normalize_unicode(text: str) -> str:
