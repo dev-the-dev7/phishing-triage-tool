@@ -41,7 +41,7 @@ def test_css_that_adds_text_flags(css, text):
     parsed = html_email(f"<style>{css}</style><p>Hello</p>")
     assert [(c.result, c.strength, c.evidence) for c in check_css_added_text(parsed)] == [
         (Result.FLAG, Strength.WEAK, f"CSS adds {text} to what the email shows, and the tool doesn't read CSS. "
-         "Look at how the email shows.")]
+         "Check what the email looks like in a mail client.")]
     assert parsed.parse_warnings == []
 
 

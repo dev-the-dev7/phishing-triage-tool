@@ -427,9 +427,8 @@ def test_a_hidden_block_only_splits_the_text_read_with_the_hidden_parts():
 
 
 @pytest.mark.parametrize("text", ["example.com<br>Sign in", "<div>example.com</div><div>Sign in</div>"])
-@pytest.mark.xfail(reason="README limitation: a domain at the end of a line and a word at the start of the next "
-                          "read as one domain across the tag", raises=AssertionError)
 def test_a_domain_at_the_end_of_a_line_in_a_link(text):
+    # Read across the tag, it's example.comsign, and comsign isn't a TLD
     assert check_link_mismatch(html_email(f'<a href="https://example.com/">{text}</a>')).result == Result.PASS
 
 
@@ -454,20 +453,23 @@ def test_tag_in_the_middle_of_a_domain_makes_the_link_check_inconclusive(text, d
     check = check_link_mismatch(html_email(f'<a href="https://evil.com/">{text}</a>'))
     assert (check.result, check.evidence) == (
         Result.INCONCLUSIVE, f"A tag sits in the middle of {domain} in a link to evil.com, where CSS could change "
-                             "what shows. Look at how the link shows.")
+                             "what the reader sees. Check what the link looks like in a mail client, without "
+                             "clicking it.")
 
 
 def test_a_mismatch_still_flags_and_each_split_is_listed_once():
     split = '<a href="https://evil.com/">paypal<i> </i>.com</a>'
     check = check_link_mismatch(html_email(split * 2 + '<a href="https://evil.net/">paypal<b> </b>.com</a>'))
     assert check.evidence == ("A tag sits in the middle of paypal.com in a link to evil.com; paypal.com in a link "
-                              "to evil.net, where CSS could change what shows. Look at how the link shows.")
+                              "to evil.net, where CSS could change what the reader sees. Check what the link looks "
+                              "like in a mail client, without clicking it.")
     assert check.caveats == []
     # With a mismatch too, the check flags, and the split is kept as a caveat
     check = check_link_mismatch(html_email(split + '<a href="https://evil.net/">paypal.com</a>'))
     assert (check.result, check.evidence) == (Result.FLAG, "text shows paypal.com but goes to evil.net")
     assert check.caveats == ["A tag sits in the middle of paypal.com in a link to evil.com, where CSS could change "
-                           "what shows. Look at how the link shows."]
+                           "what the reader sees. Check what the link looks like in a mail client, without "
+                           "clicking it."]
 
 
 CSS_CAVEAT = ('CSS adds text to what the email shows, so a link can show more than the tool reads. '
@@ -489,7 +491,7 @@ def test_text_is_read_with_and_without_the_hidden_parts():
     # If the tool took shown text for hidden, reading the hidden parts too still finds the domain
     check = check_link_mismatch(ParsedEmail(links=[Link("https://evil.com/", "", "paypal.com")]))
     assert check.evidence == "text shows paypal.com but goes to evil.com"
-    # The full text is only read when what shows doesn't find a mismatch
+    # The full text is only read when the shown text doesn't find a mismatch
     check = check_link_mismatch(ParsedEmail(links=[Link("https://evil.com/", "paypal.com", "paypalx.com")]))
     assert check.evidence == "text shows paypal.com but goes to evil.com"
 

@@ -4,9 +4,10 @@ import argparse
 import codecs
 import sys
 import unicodedata
+from datetime import date
 
 from .checks import run_checks
-from .domains import base_domain
+from .domains import SUFFIX_LIST_DATE, base_domain
 from .iocs import defang, from_email, from_text
 from .models import Indicators
 from .parser import parse_file
@@ -16,6 +17,10 @@ from .received import find_origin, received_warnings
 MAX_TEXT_BYTES = 10 * 1024 * 1024
 
 HASH_NAMES = {32: "MD5", 40: "SHA-1", 64: "SHA-256"}
+
+# The Public Suffix List copy only changes when it's updated by hand, so the tool says when
+# it's older than this
+OLD_SUFFIX_LIST_DAYS = 183
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -84,6 +89,13 @@ def _print_indicators(found: Indicators) -> None:
         _print_escaped(f"  {kind:<8} {defang(value)}")
 
 
+def _note_old_suffix_list() -> None:
+    # About the tool's copy, not the email, so it goes to stderr and stays out of the results
+    if SUFFIX_LIST_DATE and (date.today() - SUFFIX_LIST_DATE).days > OLD_SUFFIX_LIST_DAYS:
+        print(f"Note: the Public Suffix List copy is from {SUFFIX_LIST_DATE}, over 6 months old, so endings "
+              "added since aren't known. Update it with: python -m triage.update_suffixes", file=sys.stderr)
+
+
 def main(argv=None) -> int:
     # Spam is full of emoji, and Windows uses an old encoding when output is redirected to a file
     for stream in (sys.stdout, sys.stderr):
@@ -106,6 +118,7 @@ def main(argv=None) -> int:
             print(f"error: {e}", file=sys.stderr)
             return 1
         _print_indicators(from_text(text))
+        _note_old_suffix_list()
         return 0
 
     try:
@@ -140,6 +153,7 @@ def main(argv=None) -> int:
             _print_escaped(f"{'':<23}Caveat: {caveat}")
     print()
     _print_indicators(from_email(parsed, origin))
+    _note_old_suffix_list()
     return 0
 
 

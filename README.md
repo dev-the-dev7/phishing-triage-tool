@@ -19,6 +19,7 @@ Work in progress. What works now, with `python -m triage path/to/email.eml`:
 - Indicators (URLs, domains, IPs, email addresses, hashes), defanged for sharing. From an
   email, or from alert text with `python -m triage --text alert.txt` (`-` reads standard
   input)
+- Updating the tool's copy of the Public Suffix List with `python -m triage.update_suffixes`
 
 Planned:
 
@@ -89,6 +90,23 @@ The `--out`, `--json`, and `--enrich` options are there, but stop with "not buil
   they could be forged.
 
 ### Lookalikes and links
+
+- **Domains are compared by the part one owner controls, using the Public Suffix List.**
+  `mail.paypal.com` and `paypal.com` are one organization, while `b.co.uk` and `c.co.uk`
+  aren't, and neither are `paypal-login.github.io` and `my-blog.github.io`. Browsers use
+  the same list to keep one site's cookies away from another's. A copy ships with the
+  tool (`triage/public_suffix_list.dat`, under the Mozilla Public License 2.0), so it
+  works offline, and the tool reads its rules itself. A few hosting services the list
+  doesn't have yet are added in `lists.py`. A domain written in text also has to end in
+  a real TLD, or one that looks like it to the reader (`.com` with a Cyrillic `о`), so
+  `invoice.pdf` and `Thanks.Regards` aren't read as domains.
+
+- **The list is updated by hand, never by the tool.** `python -m triage.update_suffixes`
+  downloads the newest list from publicsuffix.org and replaces the copy, which `git diff`
+  then shows. The download isn't saved unless both sections start and end, and it isn't
+  older than the copy. Updating by itself would mean the tool going online without being
+  asked, and changing its own files where you can't see it. The tool notes when the copy
+  is over 6 months old.
 
 - **Lookalike domains are matched word by word, not with a similarity percentage.** The
   domain is split on dots and dashes, lookalike characters are swapped back (`0` to `o`,
@@ -207,10 +225,9 @@ The `--out`, `--json`, and `--enrich` options are there, but stop with "not buil
   domain, your company's name in a display name ("Contoso IT Support" from Gmail), and
   executive impersonation are only caught once you fill them in.
 
-- **Domains are compared by an approximate base domain** (`mail.paypal.com` becomes
-  `paypal.com`). Common country formats (`co.uk`, `com.au`, `ne.jp`) and shared hosting
-  services (`github.io`, `onmicrosoft.com`) are handled, but not every case. The Public
-  Suffix List would be exact.
+- **The Public Suffix List is only as new as the copy.** An ending added since it was
+  downloaded isn't known until it's updated: a name under it is compared by its last two
+  labels, and text ending in a new TLD isn't read as a domain.
 
 ### Headers and origin
 
@@ -315,11 +332,6 @@ The `--out`, `--json`, and `--enrich` options are there, but stop with "not buil
   since the tool never fetches anything, so text it adds isn't flagged as Text added by
   CSS. Some mail clients load one, and most block it.
 
-- **A domain at the end of a line in a link, with a word at the start of the next, makes
-  the link check inconclusive.** `example.com<br>Sign in` is read across the tag as
-  `example.comsign`, since CSS can hide a `<br>` or a block and join the text around it,
-  and the tool can't tell that `comsign` isn't a real ending for a domain.
-
 - **An image with a line of text next to it isn't flagged**, and that's what most QR code
   phishing looks like ("Scan to review your document"). The tool doesn't read images or
   QR codes.
@@ -334,6 +346,6 @@ The `--out`, `--json`, and `--enrich` options are there, but stop with "not buil
   written as plain text in an HTML part, which some clients make clickable.
 
 - **Alert text is read by pattern, so some text reads as an indicator when it isn't.**
-  Words joined by a dot (`Thanks.Regards`) and file names that end in a real TLD
-  (`script.py`, `invoice.zip`) read as domains, unless they're in a path
-  (`C:\Temp\script.py`), and a version number like `1.2.3.4` reads as an IP.
+  File names that end in a real TLD (`script.py`, `invoice.zip`) read as domains, unless
+  they're in a path (`C:\Temp\script.py`), and a version number like `1.2.3.4` reads as an
+  IP. Internal names that don't end in a real TLD (`srv01.corp.local`) aren't listed.

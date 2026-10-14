@@ -18,15 +18,15 @@ def check_hidden_text(parsed: ParsedEmail) -> list[Check]:
 
 
 def check_css_added_text(parsed: ParsedEmail) -> list[Check]:
-    # Text a <style> block adds to the page (.x::before { content: "." }) shows to the reader,
-    # and the tool doesn't read CSS, so it can't check that text. Weak, since templates add
-    # small decorations this way too. The text is shown so the analyst can judge it.
+    # The reader sees text a <style> block adds to the page (.x::before { content: "." }), but
+    # the tool doesn't read CSS, so it can't check that text. Weak, since templates add small
+    # decorations this way too. The text is shown so the analyst can judge it.
     if not parsed.css_added_text:
         return []
     shown = [f'"{text}"' if len(text) <= 40 else f'"{text[:40]}..."' for text in parsed.css_added_text]
     return [Check("Text added by CSS", Result.FLAG, Strength.WEAK,
                   f"CSS adds {join_first_five(shown)} to what the email shows, and the tool doesn't read CSS. "
-                  "Look at how the email shows.")]
+                  "Check what the email looks like in a mail client.")]
 
 
 def check_image_only(parsed: ParsedEmail) -> list[Check]:

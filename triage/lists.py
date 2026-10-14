@@ -56,7 +56,8 @@ EXECUTIVES: set[str] = set()
 
 # Hosting services where every customer gets their own subdomain, so
 # paypal-login.github.io and my-blog.github.io belong to different people.
-# Phishers use these because they're free and come with valid HTTPS.
+# Phishers use these because they're free and come with valid HTTPS. The Public Suffix
+# List has most of them too. These are all added to it, which covers the few it doesn't.
 SHARED_HOSTING: set[str] = {
     "github.io", "web.app", "firebaseapp.com", "pages.dev", "workers.dev",
     "netlify.app", "vercel.app", "herokuapp.com", "azurewebsites.net", "amazonaws.com",

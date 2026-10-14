@@ -37,7 +37,8 @@ def from_email(parsed: ParsedEmail, origin: Origin | None) -> Indicators:
     # plain text part) and other URLs, the sender addresses, the origin server and the
     # attachment hashes. A domain only mentioned in the text isn't listed, since phishing names
     # the real brand's domain to look genuine, and blocking that would be a mistake. Neither is
-    # a URL written inside an HTML link, which is only what the link shows.
+    # a URL written as an HTML link's text, since that's only what the link shows, not where
+    # it goes.
     urls, hosts, emails = [], [], []
     for href in [link.href for link in parsed.links] + parsed.other_urls:
         host = url_host(href)
@@ -72,8 +73,9 @@ def from_text(text: str) -> Indicators:
     emails = EMAIL.findall(text)
     hosts += [email.rpartition("@")[2] for email in emails]
     text = EMAIL.sub(" ", text)
-    # Paths aren't read for domains either: in evil.com/login.php or C:\setup.py, the file
-    # names are in a path, and .py and .sh are real TLDs, so they'd read as sites
+    # Paths aren't read for domains either, only what's in front of them: evil.com/files/run.sh
+    # gives evil.com, and C:\Tools\setup.py gives nothing. .sh and .py are real TLDs, so the
+    # file names would be listed as domains.
     hosts += domains_in_text(re.sub(r"(?<=[\w:-])[/\\]\S*", " ", text)) + _ips_in(text)
     return _indicators(urls, hosts, emails, [found.lower() for found in HASH.findall(text)])
 

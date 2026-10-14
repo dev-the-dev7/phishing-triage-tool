@@ -132,9 +132,9 @@ def test_nothing_found():
     assert from_text("No indicators here, see you at 10:30.") == Indicators()
 
 
-@pytest.mark.xfail(reason="README limitation: words joined by a dot read as a domain", raises=AssertionError)
-def test_words_joined_by_a_dot():
-    assert from_text("Thanks.Regards").domains == []
+@pytest.mark.parametrize("text", ["Thanks.Regards", "invoice.pdf", "srv01.corp.local"])
+def test_endings_that_arent_tlds_arent_domains(text):
+    assert from_text(text).domains == []
 
 
 def email(**fields) -> ParsedEmail:

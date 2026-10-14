@@ -1,1 +1,7 @@
 requests==2.34.2
+# What requests installs, pinned too, so a new release of one of them isn't picked up
+# without anyone looking at it
+certifi==2026.7.22
+charset-normalizer==3.5.2
+idna==3.20
+urllib3==2.8.0

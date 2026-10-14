@@ -46,8 +46,8 @@ def check_link_mismatch(parsed: ParsedEmail) -> Check:
     # that makes the check inconclusive, since a pass would promise more than it knows. With
     # one, the check flags, and the split is a caveat.
     split = list(dict.fromkeys(split))
-    split_text = (f"A tag sits in the middle of {join_first_five(split)}, where CSS could change what shows. "
-                  "Look at how the link shows.")
+    split_text = (f"A tag sits in the middle of {join_first_five(split)}, where CSS could change what the reader "
+                  "sees. Check what the link looks like in a mail client, without clicking it.")
     caveats = []
     if parsed.css_added_text:
         caveats.append('CSS adds text to what the email shows, so a link can show more than the tool reads. '

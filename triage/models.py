@@ -17,7 +17,7 @@ class Link:
     text: str  # what the reader sees
     full_text: str = ""  # every bit of text in the link, with the parts a browser hides
     # Domains in the text with a tag in the middle (pay<b>pal</b>.com), where CSS the tool
-    # doesn't read could change what shows
+    # doesn't read could change what the reader sees
     split_domains: list[str] = field(default_factory=list)
 
 

@@ -3,6 +3,8 @@
 import ipaddress
 import re
 import unicodedata
+from datetime import date
+from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from .lists import SHARED_HOSTING
@@ -16,25 +18,75 @@ INTERNAL_NETWORKS = [ipaddress.ip_network(n) for n in (
 )]
 
 
-# Second-level labels some countries register under, like co.uk, com.au, ne.jp
-COUNTRY_SECOND_LEVEL = {"co", "com", "org", "net", "gov", "ac", "edu", "ne", "or", "go"}
+# The Public Suffix List (publicsuffix.org): the endings people register names under, like
+# com, co.uk, and github.io, so two names under one have different owners. Browsers use it
+# to keep one site's cookies from another's. A copy ships with the tool, so it works
+# offline, and it only changes when you run update_suffixes.py. Rules are one ending per
+# line, *.ck means every name under ck is an ending, and !www.ck makes an exception to that.
+PUBLIC_SUFFIX_FILE = Path(__file__).with_name("public_suffix_list.dat")
+
+
+def _read_suffixes(text: str) -> tuple[set[str], set[str], set[str]]:
+    rules, wildcards, exceptions = set(), set(), set()
+    for line in text.splitlines():
+        # A rule is the first word on its line
+        words = line.split()
+        if not words or words[0].startswith("//"):
+            continue
+        rule = words[0].lower()
+        if rule.startswith("!"):
+            exceptions.add(rule[1:])
+        elif rule.startswith("*."):
+            wildcards.add(rule[2:])
+        else:
+            rules.add(rule)
+    return rules, wildcards, exceptions
+
+
+def list_date(text: str) -> date | None:
+    # When the list was published, from its "// VERSION: 2026-10-07_07-28-19_UTC" line
+    found = re.search(r"^// VERSION: ([0-9]{4}-[0-9]{2}-[0-9]{2})", text, re.M)
+    return date.fromisoformat(found.group(1)) if found else None
+
+
+_suffix_list = PUBLIC_SUFFIX_FILE.read_text(encoding="utf-8")
+SUFFIXES, WILDCARDS, EXCEPTIONS = _read_suffixes(_suffix_list)
+SUFFIX_LIST_DATE = list_date(_suffix_list)
+# Hosting services the list doesn't have yet (see lists.py)
+SUFFIXES |= SHARED_HOSTING
+# Every TLD, and the most labels a rule can match. Only that many labels at the end of a
+# host are compared, so one with thousands of labels is still quick.
+TLDS = {rule.rpartition(".")[2] for rule in SUFFIXES | WILDCARDS | EXCEPTIONS}
+MAX_RULE_LABELS = max(rule.count(".") + 2 for rule in SUFFIXES | WILDCARDS | EXCEPTIONS)
 
 
 def base_domain(domain: str) -> str:
-    # Rough registrable domain: mail.paypal.com -> paypal.com, a.b.co.uk -> b.co.uk.
-    # The Public Suffix List would be exact. Until that's added, this covers the common cases.
+    # The registrable domain: the public suffix and one label in front of it, which is what
+    # one owner controls. mail.paypal.com gives paypal.com, a.b.co.uk gives b.co.uk, and
+    # www.paypal-login.github.io gives paypal-login.github.io. A suffix on its own (co.uk)
+    # is returned whole.
     domain = domain.lower().strip(".")
     if is_ip(domain):
         return domain
+    labels = domain.split(".")
+    # The list writes non-English endings in Unicode, so xn-- labels are compared decoded.
+    # Each one decodes to one label, so the count stays the same.
+    names = decode_idn(domain).split(".")
+    return ".".join(labels[-(_suffix_length(names) + 1):])
 
-    parts = domain.split(".")
-    for suffix in SHARED_HOSTING:
-        if domain.endswith("." + suffix):
-            # Keep the customer's own label: paypal-login.github.io stays whole
-            return ".".join(parts[-(suffix.count(".") + 2):])
-    if len(parts) >= 3 and len(parts[-1]) == 2 and parts[-2] in COUNTRY_SECOND_LEVEL:
-        return ".".join(parts[-3:])
-    return ".".join(parts[-2:])
+
+def _suffix_length(labels: list[str]) -> int:
+    # How many labels at the end are the public suffix. An exception wins over every other
+    # rule and is registrable itself, so !www.ck makes the suffix ck. Otherwise the rule with
+    # the most labels wins, and with none, the suffix is the last label.
+    longest_first = range(min(len(labels), MAX_RULE_LABELS), 0, -1)
+    for count in longest_first:
+        if ".".join(labels[-count:]) in EXCEPTIONS:
+            return count - 1
+    for count in longest_first:
+        if ".".join(labels[-count:]) in SUFFIXES or (count > 1 and ".".join(labels[-count + 1:]) in WILDCARDS):
+            return count
+    return 1
 
 
 def registered_name(base: str) -> str:
@@ -118,14 +170,6 @@ def ascii_domain(domain: str) -> str:
         return domain
 
 
-# File names like "invoice.pdf" look like domains. .zip and .mov are left out on purpose
-# because they're real TLDs that phishers use.
-FILE_EXTENSIONS = {"pdf", "doc", "docx", "docm", "xls", "xlsx", "xlsm", "ppt", "pptx", "htm", "html",
-                   "txt", "csv", "rtf", "png", "jpg", "jpeg", "gif", "svg", "exe", "dll", "msi", "bat",
-                   "cmd", "js", "vbs", "hta", "lnk", "scr", "jar", "iso", "img", "rar", "gz", "eml",
-                   "msg", "log", "tmp", "json", "xml"}
-
-
 # A URL written out in text, which mail clients make clickable. It runs to the next space,
 # quote or backtick (Markdown's `code`), and punctuation at the end is taken as the sentence's,
 # along with Markdown's *bold*.
@@ -138,9 +182,17 @@ def urls_in_text(text: str) -> list[str]:
 
 def domains_in_text(text: str) -> list[str]:
     # Domains written in text, normalized like a link's host. Any letters count ([^\W\d_]), not
-    # just a-z, so fullwidth or Cyrillic text that looks like paypal.com is still found.
-    found = re.finditer(r"(?<![\w.-])(?:[\w-]+\.)+([^\W\d_]{2,})(?![\w-])", normalize_unicode(text))
-    return [m.group(0) for m in found if m.group(1) not in FILE_EXTENSIONS]
+    # just a-z, so fullwidth or Cyrillic text that looks like paypal.com is still found. The
+    # ending has to be a real TLD, or look like one to the reader (com with a Cyrillic с, or
+    # corn for com), so file names (invoice.pdf) and words joined by a dot (Thanks.Regards)
+    # aren't domains. .zip and .mov are real TLDs, so invoice.zip is one. A non-English TLD
+    # can be in its xn-- form, the way DNS and proxy logs write it (xn--p1ai is .рф).
+    found = re.finditer(r"(?<![\w.-])(?:[\w-]+\.)+([^\W\d_]{2,}|xn--[a-z0-9-]+)(?![\w-])", normalize_unicode(text))
+    return [m.group(0) for m in found if _passes_for_tld(decode_idn(m.group(1)))]
+
+
+def _passes_for_tld(label: str) -> bool:
+    return any(form in TLDS for form in (label, unmask_lookalikes(label, pairs=False), unmask_lookalikes(label)))
 
 
 def normalize_unicode(text: str) -> str:

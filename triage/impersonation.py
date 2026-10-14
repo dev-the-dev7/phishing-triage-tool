@@ -57,7 +57,7 @@ def check_display_name(parsed: ParsedEmail) -> Check:
         name_found = any(_has_words(form, executive_form) for form in display_forms
                          for executive_form in lookalike_forms(executive))
         if name_found and base not in own_domains:
-            hits.append(f"uses executive {executive}'s name but the mail is outside your organization's domains from {domain}")
+            hits.append(f"uses executive {executive}'s name but the mail is from {domain}, outside your organization's domains")
 
     if hits:
         return Check(name, Result.FLAG, strength, f'"{display}" ' + "; ".join(hits))
@@ -176,7 +176,7 @@ def _unlisted_domains(parsed: ParsedEmail) -> list[tuple[str, str, str]]:
     owned_domains = {d for _, domains in _impersonation_targets() for d in domains}
     unlisted = []
     for domain in sorted(found_in):
-        # How the domain shows to the reader: xn--pypal-4ve.com displays as pаypal.com
+        # The domain as the reader sees it: xn--pypal-4ve.com shows as pаypal.com
         display_domain = decode_idn(domain)
         base = base_domain(display_domain)
         # Free webmail domains are real providers, not lookalikes, and have their own check

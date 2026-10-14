@@ -103,7 +103,7 @@ class _HeaderLengthPolicy(email.policy.EmailPolicy):
 
 
 def parse_file(path) -> ParsedEmail:
-    # Binary mode so the email library handles charsets instead of us guessing.
+    # Binary mode so the email library handles charsets instead of the tool guessing.
     # One byte past the limit is enough to know it's too big, without reading all of it.
     with open(path, "rb") as f:
         raw = f.read(MAX_EMAIL_BYTES + 1)
@@ -577,7 +577,7 @@ def _css_added_text(css: str) -> list[str]:
     # Text a <style> block adds to the page, like .x::before { content: "." }, which the reader
     # sees and the tool doesn't. Escapes are decoded (\2e is a dot). Only text with a letter,
     # digit, dot or @ counts, and text taken from an attribute (attr(title)), since icon fonts
-    # (content: "\f101", a symbol) and layout tricks (content: "") add nothing that reads. An
+    # (content: "\f101", a symbol) and layout tricks (content: "") add no readable text. An
     # image (content: url("...")) isn't text either: email trackers load one that way.
     css = re.sub(r"/\*.*?(?:\*/|\Z)", "", css, flags=re.S)
     found = []

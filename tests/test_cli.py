@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -118,7 +119,8 @@ def test_caveats_are_printed_under_their_check(capsys, tmp_path):
     lines = out.splitlines()
     flag = lines.index("  FLAG         strong  Link text vs destination: text shows paypal.com but goes to evil.net")
     assert lines[flag + 1] == (" " * 23 + "Caveat: A tag sits in the middle of paypal.com in a link to evil.com, "
-                               "where CSS could change what shows. Look at how the link shows.")
+                               "where CSS could change what the reader sees. Check what the link looks like in a "
+                               "mail client, without clicking it.")
     # The line after is the next check
     assert lines[flag + 2].startswith("  PASS         medium  Script, file or app link: ")
 
@@ -260,6 +262,22 @@ def test_missing_text_file_gives_a_clean_error(capsys, tmp_path, name):
     code, _, err = run(capsys, "--text", tmp_path / name if name else "")
     assert code == 1
     assert err.startswith("error: ")
+
+
+@pytest.mark.parametrize("days_old, noted", [(184, True), (183, False), (None, False)],
+                         ids=["over 6 months", "6 months", "no date"])
+def test_an_old_suffix_list_is_noted(capsys, tmp_path, monkeypatch, days_old, noted):
+    # It's about the tool's copy, not the email, so it goes to stderr, after the results
+    published = date.today() - timedelta(days=days_old) if days_old is not None else None
+    monkeypatch.setattr(cli, "SUFFIX_LIST_DATE", published)
+    for args in ([FIXTURES / "clean.eml"], ["--text", write_text(tmp_path, ALERT.encode())]):
+        code, _, err = run(capsys, *args)
+        assert code == 0
+        if noted:
+            assert err == (f"Note: the Public Suffix List copy is from {published}, over 6 months old, so endings "
+                           "added since aren't known. Update it with: python -m triage.update_suffixes\n")
+        else:
+            assert err == ""
 
 
 @pytest.mark.parametrize("args", [[], [FIXTURES / "clean.eml", "--text", "alert.txt"]], ids=["neither", "both"])

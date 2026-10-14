@@ -1,10 +1,13 @@
 """Tests for triage/domains.py: reading a link's host, and swapping lookalike characters back."""
 
+import re
 import unicodedata
+from datetime import date
+from pathlib import Path
 
 import pytest
 
-from triage.domains import (LOOKALIKE_CHARS, ascii_domain, base_domain, decode_idn, domains_in_text,
+from triage.domains import (LOOKALIKE_CHARS, ascii_domain, base_domain, decode_idn, domains_in_text, list_date,
                             lookalike_forms, normalize_unicode, registered_name, unmask_lookalikes, url_host)
 
 
@@ -131,6 +134,24 @@ def test_domains_in_text():
     assert domains_in_text(text) == ["paypal.com", "evil.net", "invoice.zip"]
 
 
+@pytest.mark.parametrize("text, found", [
+    # Not a real TLD
+    ("Thanks.Regards", []),
+    ("example.comSign", []),
+    # Endings that look like a real TLD to the reader: a Cyrillic es, and rn for m
+    ("paypal.\N{CYRILLIC SMALL LETTER ES}om", ["paypal.\N{CYRILLIC SMALL LETTER ES}om"]),
+    ("paypal.corn", ["paypal.corn"]),
+    # A non-English TLD (Russia's), and the same in its xn-- form, as DNS and proxy logs write it
+    ("x.\N{CYRILLIC SMALL LETTER ER}\N{CYRILLIC SMALL LETTER EF}",
+     ["x.\N{CYRILLIC SMALL LETTER ER}\N{CYRILLIC SMALL LETTER EF}"]),
+    ("Blocked xn--90asilg6f.xn--p1ai", ["xn--90asilg6f.xn--p1ai"]),
+    # An xn-- ending that isn't a real TLD
+    ("x.xn--zz", []),
+])
+def test_domains_in_text_end_in_a_tld(text, found):
+    assert domains_in_text(text) == found
+
+
 @pytest.mark.parametrize("href", ["mailto:a@evil.com", "javascript:alert(1)", "", "http://"])
 def test_url_host_is_none_without_a_web_host(href):
     assert url_host(href) is None
@@ -150,9 +171,50 @@ def test_url_host_is_none_without_a_web_host(href):
     ("files.evil.r2.dev", "evil.r2.dev"),
     ("contoso.onmicrosoft.com", "contoso.onmicrosoft.com"),
     ("203.0.113.5", "203.0.113.5"),
+    # The rule with the most labels wins: s3.amazonaws.com over amazonaws.com
+    ("a.bucket.s3.amazonaws.com", "bucket.s3.amazonaws.com"),
+    # *.ck makes every name under ck an ending, and !www.ck makes www.ck registrable itself
+    ("a.b.example.ck", "b.example.ck"),
+    ("a.www.ck", "www.ck"),
+    # Non-English endings are in the list in Unicode, like the Chinese for "personal" under
+    # .hk, and match in the xn-- form too
+    ("www.x.\N{CJK UNIFIED IDEOGRAPH-500B}\N{CJK UNIFIED IDEOGRAPH-4EBA}.hk",
+     "x.\N{CJK UNIFIED IDEOGRAPH-500B}\N{CJK UNIFIED IDEOGRAPH-4EBA}.hk"),
+    ("www.x.xn--gmqw5a.hk", "x.xn--gmqw5a.hk"),
+    # A TLD the list doesn't have still keeps one label in front of it
+    ("mail.example.notarealtld", "example.notarealtld"),
+    # An ending on its own is returned whole
+    ("co.uk", "co.uk"),
+    ("github.io", "github.io"),
 ])
 def test_base_domain(domain, base):
     assert base_domain(domain) == base
+
+
+# The Public Suffix List project's own test cases (tests/test_psl.txt in its repository, public
+# domain): checkPublicSuffix(host, registrable domain), with null when the host is an ending
+# itself, which base_domain returns whole
+PSL_TESTS = (Path(__file__).parent / "fixtures" / "test_psl.txt").read_text(encoding="utf-8")
+PSL_CASES = re.findall(r"^checkPublicSuffix\('([^']*)', (?:'([^']*)'|null)\);", PSL_TESTS, re.M)
+
+
+def test_every_public_suffix_list_case_is_read():
+    assert len(PSL_CASES) == sum(line.startswith("checkPublicSuffix('") for line in PSL_TESTS.splitlines())
+
+
+# The ones with a leading dot (.example.com) are left out: no host starts with a dot, and
+# base_domain drops one
+@pytest.mark.parametrize("host, registrable", [case for case in PSL_CASES if not case[0].startswith(".")])
+def test_base_domain_passes_the_public_suffix_list_tests(host, registrable):
+    assert base_domain(host) == (registrable or host.lower())
+
+
+@pytest.mark.parametrize("text, published", [
+    ("// VERSION: 2026-10-07_07-28-19_UTC\n// COMMIT: 3929462\ncom\n", date(2026, 10, 7)),
+    ("com\n", None),
+])
+def test_list_date(text, published):
+    assert list_date(text) == published
 
 
 def test_registered_name():
