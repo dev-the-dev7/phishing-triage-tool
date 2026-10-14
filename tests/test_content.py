@@ -1,5 +1,5 @@
-"""Tests for what the body shows (parser.py) and the checks on it (content.py): text hidden
-inside words, an email that's only an image, and text added by CSS."""
+"""Tests for what the body shows (html_reader.py) and the checks on it (content.py): text
+hidden inside words, an email that's only an image, and text added by CSS."""
 
 import pytest
 

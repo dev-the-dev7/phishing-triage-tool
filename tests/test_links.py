@@ -1,9 +1,9 @@
-"""Tests for links: finding them the way a mail client shows them (parser.py), and link text
-that shows one domain but goes to another (links.py)."""
+"""Tests for links: finding them the way a mail client shows them (parser.py and
+html_reader.py), and link text that shows one domain but goes to another (links.py)."""
 
 import pytest
 
-from triage import parser
+from triage import html_reader
 from triage.links import check_link_mismatch, check_link_type
 from triage.models import Link, ParsedEmail, Result
 from triage.parser import parse_bytes
@@ -576,7 +576,7 @@ def test_links_are_read_against_every_base(decoy):
 
 def test_base_limit(monkeypatch):
     # Up to the limit every base is read. Past it, the warning says to check the rest by hand.
-    monkeypatch.setattr(parser, "MAX_BASES", 2)
+    monkeypatch.setattr(html_reader, "MAX_BASES", 2)
     bases = '<base href="https://one.com/"><base href="https://two.com/">'
     at_limit = html_email(bases + '<a href="/login">Sign in</a>')
     assert [href for href, _ in links_in(at_limit)] == ["https://one.com/login", "https://two.com/login"]
@@ -598,14 +598,14 @@ def test_no_break_space_before_a_link_isnt_trimmed():
 def test_html_that_cant_be_parsed_keeps_the_links_before_it(monkeypatch):
     # Python's HTML parser no longer raises on broken markup like <![, so the test raises an
     # error at the <b> inside the second link. That link is kept with its text so far.
-    read_tag = parser._HTMLCollector.handle_starttag
+    read_tag = html_reader._HTMLCollector.handle_starttag
 
     def fail_at_bold(self, tag, attrs):
         if tag == "b":
             raise ValueError("broken markup")
         read_tag(self, tag, attrs)
 
-    monkeypatch.setattr(parser._HTMLCollector, "handle_starttag", fail_at_bold)
+    monkeypatch.setattr(html_reader._HTMLCollector, "handle_starttag", fail_at_bold)
     parsed = html_email('<a href="https://one.com/">one</a><a href="https://two.com/">two <b>bold</b></a>'
                         '<a href="https://three.com/">three</a>')
     assert links_in(parsed) == [("https://one.com/", "one"), ("https://two.com/", "two")]
