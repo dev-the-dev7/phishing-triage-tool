@@ -7,7 +7,7 @@ __pycache__/
 .coverage.*
 htmlcov/
 
-# API keys live here, never commit them
+# API keys, if you keep them in a file. The tool reads them from environment variables.
 .env
 
 # Real emails contain personal data (your address, names, tracking IDs) and should not be committed

@@ -19,14 +19,40 @@ Work in progress. What works now, with `python -m triage path/to/email.eml`:
 - Indicators (URLs, domains, IPs, email addresses, hashes), defanged for sharing. From an
   email, or from alert text with `python -m triage --text alert.txt` (`-` reads standard
   input)
+- Reputation lookups with `--enrich`: VirusTotal for hashes, domains, URLs, and IPs, and
+  AbuseIPDB for IPs
 - Updating the tool's copy of the Public Suffix List with `python -m triage.update_suffixes`
 
 Planned:
 
-- Optional reputation lookups with VirusTotal and AbuseIPDB, off unless asked for
 - A Markdown triage note and a JSON report, with findings sorted by strength
 
-The `--out`, `--json`, and `--enrich` options are there, but stop with "not built yet".
+The `--out` and `--json` options are there, but stop with "not built yet".
+
+## Setting up the lookups
+
+`--enrich` needs a free API key from [VirusTotal](https://www.virustotal.com) and one from
+[AbuseIPDB](https://www.abuseipdb.com). The tool reads them from environment variables. In
+PowerShell:
+
+```powershell
+# For this window only. Read-Host keeps the key out of PowerShell's history file, which
+# saves everything typed at the prompt.
+$env:VT_API_KEY = Read-Host "VirusTotal API key"
+$env:ABUSEIPDB_API_KEY = Read-Host "AbuseIPDB API key"
+
+# For every new window, saved in your Windows account. Apps already open, like VS Code,
+# only see it once they're restarted.
+[Environment]::SetEnvironmentVariable("VT_API_KEY", (Read-Host "VirusTotal API key"), "User")
+[Environment]::SetEnvironmentVariable("ABUSEIPDB_API_KEY", (Read-Host "AbuseIPDB API key"), "User")
+```
+
+Then run `python -m triage path/to/email.eml --enrich`. Without a key, that service's
+lookups show as unavailable and the rest of the output is the same.
+
+Behind a proxy that inspects TLS, as many company networks have, the lookups show as
+unavailable with `SSLError` until `REQUESTS_CA_BUNDLE` points to a certificate file that
+includes the company's root certificate.
 
 ## Design decisions
 
@@ -207,6 +233,61 @@ The `--out`, `--json`, and `--enrich` options are there, but stop with "not buil
   `http://paypa1.com/`, and `http://3627734532/` as `http://216.58.214.4/`. Defanged, a
   Cyrillic `pаypal[.]com` looks just like the real one, and `xn--pypal-4ve[.]com` doesn't.
 
+### Lookups
+
+- **Nothing goes online without `--enrich`, and nothing is uploaded with it.** Every
+  request is a GET for a report the service already has. Attachments are looked up by
+  their SHA-256 hash: an uploaded file is shared with every VirusTotal customer, and it
+  could hold your company's data. Scanning a URL takes a POST, which the tool never sends,
+  so a URL VirusTotal hasn't seen just comes back as not found.
+
+- **Not found means unknown, not clean.** A phishing domain registered yesterday has no
+  history. Results are written plainly ("9 of 89 engines flagged it malicious") with the
+  date VirusTotal last checked, since a page can turn malicious after a clean scan.
+  Engines that timed out or don't scan that kind of file aren't counted.
+
+- **What would tell the service about your network or your people isn't sent.** Private
+  and reserved IPs and internal names (`srv01.corp.local`) mean nothing outside your
+  network. Neither are your own domains in `OWN_DOMAINS`: alert text can name your
+  machines (`wks-0231.corp.contoso.com`), and VirusTotal can't tell you anything new about
+  them. DNS's own `.arpa` names aren't sent either: they're never websites, and a reverse
+  lookup in a DNS log (`5.0.168.192.in-addr.arpa`) has an IP in it, often a private one.
+  That IP is listed on its own (192.168.0.5) and looked up if it's public. The part of a
+  URL after `#` never reaches the website, and phishing kits put the reader's address
+  there, so it's left off. A URL with an email address anywhere else, even encoded twice
+  (`%2540`) inside a link it carries, isn't looked up at all, and its domain is looked up
+  instead.
+
+- **The free limits decide the order.** VirusTotal's free key allows 4 lookups a minute and
+  500 a day, so a run sends at most 8, waiting when it has to, and AbuseIPDB gets at most
+  10. AbuseIPDB has no limit a minute, so its lookups go first and are done before any
+  wait. For VirusTotal, attachments go first, then the sender's domains, the domains links
+  go to, the links, pictures, and IPs, which AbuseIPDB covers too. The sender's domains
+  come before the links' because there are only one to three, and an email can link to a
+  dozen domains and use up every lookup. Pictures are mostly logos, like the ones in an
+  Outlook signature, and VirusTotal rarely has them. A picture is declared as one and named
+  like one (`.png`, `.jpg`), so it opens in a picture viewer and can't run. An SVG can hold
+  scripts, so it goes first with the other files. The brands' real domains, free webmail,
+  and links to them go last. Anything past the limit is shown as skipped. A run only counts
+  its own lookups, so one started straight after another can find VirusTotal's minute used
+  up. It then waits a minute and tries once more, and if it's refused again, the day's
+  limit was reached. When a key is refused, the day's limit is reached, a service can't be
+  reached, or a proxy or sign-in page answers for it, the rest of its lookups show as
+  unavailable without being sent. Ctrl+C during a wait does the same for both services, so
+  the indicators are still shown, and a second Ctrl+C stops the tool.
+
+- **Found results are kept for a day** in your own cache folder
+  (`%LOCALAPPDATA%\phishing-triage` on Windows), so running the tool again doesn't use up
+  the limits. Not found isn't kept, and neither is a report no engine has checked yet,
+  since either can change within the hour. Each entry is filed under a hash of what was
+  sent, so the file isn't a readable list of what you've looked up, and the same
+  campaign's link with each reader's address after `#` is only looked up once.
+
+- **The keys come from environment variables**, never from a file in the repository, and
+  are sent in a request header, never in the address, so they stay out of error messages
+  and proxy logs, which record addresses. Redirects aren't followed, since the key header
+  would go along to wherever one points.
+
 ## Limitations
 
 ### Lists and configuration
@@ -316,6 +397,13 @@ The `--out`, `--json`, and `--enrich` options are there, but stop with "not buil
   `linkedin.com/slink`) look like they go to the brand. The evidence there is where the
   links end up.
 
+- **Links rewritten by an email security service hide where they go.** Microsoft
+  Defender's Safe Links (`safelinks.protection.outlook.com`) and Proofpoint
+  (`urldefense.com`) rewrite every link in delivered mail to go through them first. The
+  link check then flags each one, since its text shows one domain and it goes to the
+  service, and the real destination isn't listed or looked up with `--enrich`. Reading the
+  real link out of the ones that carry it is planned.
+
 ### Content
 
 - **Only hiding done in a tag's own `style` is seen.** Text hidden by a rule in a `<style>`
@@ -349,3 +437,35 @@ The `--out`, `--json`, and `--enrich` options are there, but stop with "not buil
   File names that end in a real TLD (`script.py`, `invoice.zip`) read as domains, unless
   they're in a path (`C:\Temp\script.py`), and a version number like `1.2.3.4` reads as an
   IP. Internal names that don't end in a real TLD (`srv01.corp.local`) aren't listed.
+
+### Lookups
+
+- **VirusTotal's free key is for personal use.** Its terms say the free API "must not be
+  used in commercial products or services" or in business workflows. Triage at work needs
+  your organization's paid key.
+
+- **Reputation lags behind new phishing.** A domain registered this morning is usually not
+  found or clean, and so is a link made for one reader. A clean result is no reason to
+  close a report.
+
+- **A URL can carry the reader's identity in a form the tool can't see**, like a token or
+  a base64-encoded address, and that's sent to VirusTotal with the URL. So is a live
+  sign-in or password reset link, when a real email is reported by mistake.
+
+- **Any 32, 40, or 64 hex characters in alert text are looked up as a file hash.** A
+  token or ID written that way is sent to VirusTotal too.
+
+- **Internal names under a public domain are only kept back once `OWN_DOMAINS` is filled
+  in.** Until then, a name like `wks-0231.corp.contoso.com` in alert text is looked up like
+  any other domain.
+
+- **8 VirusTotal lookups don't cover an email with many links or a long alert.** The rest
+  are shown as skipped. With a paid key, raise `MAX_VT_LOOKUPS` in `enrich.py`.
+
+- **Links to forms and files on a brand's own domain go last**, with the brand's real
+  links, so in an email past the limit they can be skipped. Phishing pages are often made
+  with these services (`docs.google.com/forms`, `forms.office.com`), since the domain
+  looks safe. They go last because phishing also copies the brand's real links (privacy
+  policy, help pages) to look genuine, and those would use up the lookups instead.
+
+- **A result from the cache can be up to a day old.**

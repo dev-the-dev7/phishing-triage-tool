@@ -109,3 +109,18 @@ class Indicators:
     ips: list[str] = field(default_factory=list)
     emails: list[str] = field(default_factory=list)
     hashes: list[str] = field(default_factory=list)  # MD5, SHA-1 or SHA-256, told apart by length
+
+
+class LookupStatus(StrEnum):
+    FOUND = "found"
+    NOT_FOUND = "not found"  # the service has never seen it, which isn't the same as clean
+    UNAVAILABLE = "unavailable"  # no usable key, an error, the service's limit was reached, or Ctrl+C
+    SKIPPED = "skipped"  # not sent: past the run's limit, or something that shouldn't leave your network
+
+
+@dataclass
+class Reputation:
+    service: str  # VirusTotal or AbuseIPDB
+    status: LookupStatus
+    text: str  # what was found, or why nothing was, in plain words
+    facts: dict = field(default_factory=dict)  # the numbers a found result is written from

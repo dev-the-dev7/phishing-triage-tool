@@ -3,17 +3,20 @@ emails written to a temporary folder."""
 
 import contextlib
 import io
+import json
 import os
 import re
 import subprocess
 import sys
 from datetime import date, timedelta
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
+import requests
 
 import triage.__main__ as cli
-from triage import impersonation
+from triage import enrich, impersonation
 from triage.__main__ import main
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -192,8 +195,7 @@ def test_output_in_an_encoding_without_emoji(tmp_path):
 @pytest.mark.parametrize("args, flags", [
     (["--out", "note.md"], "--out"),
     (["--json", "report.json"], "--json"),
-    (["--enrich"], "--enrich"),
-    (["--out", "note.md", "--enrich"], "--out, --enrich"),
+    (["--out", "note.md", "--json", "report.json"], "--out, --json"),
 ])
 def test_options_not_built_yet_stop(capsys, args, flags):
     # Stops instead of quietly skipping what was asked for
@@ -236,6 +238,90 @@ def test_alert_text_from_standard_input(capsys, monkeypatch):
     code, out, _ = run(capsys, "--text", "-")
     assert code == 0
     assert out == ALERT_INDICATORS
+
+
+def test_nothing_is_looked_up_without_enrich(capsys, tmp_path, monkeypatch):
+    # Even with both keys set
+    monkeypatch.setenv("VT_API_KEY", "vt-key")
+    monkeypatch.setenv("ABUSEIPDB_API_KEY", "abuseipdb-key")
+    sent = []
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: sent.append(args))
+    assert run(capsys, FIXTURES / "suspicious.eml")[0] == 0
+    assert run(capsys, "--text", write_text(tmp_path, ALERT.encode()))[0] == 0
+    assert sent == []
+
+
+def test_enrich_without_keys_still_runs(capsys):
+    # Each lookup says why there's no result, and nothing is sent. The origin IP is reserved
+    # for documentation, so it wouldn't be sent anyway.
+    code, out, _ = run(capsys, FIXTURES / "suspicious.eml", "--enrich")
+    assert code == 0
+    indicators = out.split("\n\n")[2].splitlines()
+    unset = " " * 11 + "VirusTotal: unavailable, VT_API_KEY isn't set"
+    assert indicators[indicators.index("  Domain   bit[.]ly") + 1] == unset
+    assert indicators[indicators.index("  IP       203[.]0[.]113[.]45") + 1:][:2] == [
+        " " * 11 + "AbuseIPDB: skipped, private or reserved address",
+        " " * 11 + "VirusTotal: skipped, private or reserved address",
+    ]
+    # Email addresses aren't looked up, but their domains are
+    assert indicators[indicators.index("  Email    security[@]paypa1[.]com") + 1].startswith("  Email ")
+
+
+def test_enrich_results_go_under_each_indicator(capsys, tmp_path, monkeypatch):
+    monkeypatch.setenv("VT_API_KEY", "vt-key")
+    monkeypatch.setenv("ABUSEIPDB_API_KEY", "abuseipdb-key")
+
+    def get(url, **kwargs):
+        if kwargs["params"]:
+            body = {"data": {"abuseConfidenceScore": 100, "totalReports": 40, "numDistinctUsers": 12}}
+        elif url.endswith("/domains/evil.com"):
+            body = {"data": {"attributes": {"last_analysis_stats": {"malicious": 9, "undetected": 80},
+                                            "last_analysis_date": 1791797400}}}
+        else:
+            body = {"error": {"code": "NotFoundError"}}
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.status_code = 404 if "error" in body else 200
+        response.iter_content.return_value = [json.dumps(body).encode()]
+        return response
+
+    monkeypatch.setattr(requests, "get", get)
+    alert = "Blocked hxxps://evil[.]com/login from 8.8.8.8, sent by x[@]evil[.]com"
+    code, out, _ = run(capsys, "--text", write_text(tmp_path, alert.encode()), "--enrich")
+    assert code == 0
+    assert out == ("Indicators, defanged:\n"
+                   "  URL      hxxps://evil[.]com/login\n"
+                   "           VirusTotal: not found (unknown, not clean)\n"
+                   "  Domain   evil[.]com\n"
+                   "           VirusTotal: 9 of 89 engines flagged it malicious, last checked 2026-10-12\n"
+                   "  IP       8[.]8[.]8[.]8\n"
+                   "           AbuseIPDB: reported 40 times by 12 users in the last 90 days, abuse confidence 100%\n"
+                   "           VirusTotal: not found (unknown, not clean)\n"
+                   "  Email    x[@]evil[.]com\n")
+
+
+def test_enrich_is_given_the_attachments(capsys, tmp_path, monkeypatch):
+    # Used to put pictures, like a signature's logo, after the links
+    given = []
+    monkeypatch.setattr(cli, "look_up", lambda found, attachments=None: given.append(attachments) or {})
+    path = write_email(tmp_path, (
+        "From: a@example.org\r\nTo: someone@example.net\r\nSubject: s\r\n"
+        'Content-Type: multipart/related; boundary="B"\r\n\r\n'
+        '--B\r\nContent-Type: text/html\r\n\r\n<img src="cid:image001">\r\n'
+        '--B\r\nContent-Type: image/png\r\nContent-Disposition: inline; filename="image001.png"\r\n\r\nx\r\n--B--'
+    ))
+    assert run(capsys, path, "--enrich")[0] == 0
+    assert [attachment.filename for attachment in given[0]] == ["image001.png"]
+
+
+def test_a_second_ctrl_c_stops_without_a_traceback(capsys, tmp_path, monkeypatch):
+    # The first only skips the lookups left
+    def ctrl_c(*args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(enrich, "_look_up_one", ctrl_c)
+    code, _, err = run(capsys, "--text", write_text(tmp_path, ALERT.encode()), "--enrich")
+    assert (code, err) == (130, "Stopped\n")
 
 
 def test_alert_text_without_indicators(capsys, tmp_path):
@@ -295,7 +381,7 @@ def test_help_describes_what_works(capsys):
     # Named triage, not __main__.py, which python -m would show
     assert out.startswith("usage: triage ")
     assert "The verdict is left to the analyst." in out
-    assert out.count("Not built yet") == 3
+    assert out.count("Not built yet") == 2
 
 
 @pytest.mark.parametrize("text, message", [

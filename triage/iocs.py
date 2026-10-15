@@ -9,6 +9,12 @@ from .models import Indicators, Origin, ParsedEmail
 
 EMAIL = re.compile(r"(?<![\w.+%-])[\w.+%-]+@[\w-]+(?:\.[\w-]+)+")
 IPV4 = re.compile(r"(?<![0-9.])[0-9]{1,3}(?:\.[0-9]{1,3}){3}(?!\.?[0-9])")
+# A reverse DNS name, like those in DNS logs: 5.0.168.192.in-addr.arpa asks for the name of
+# 192.168.0.5
+REVERSE_DNS = re.compile(r"(?<![\w.-])([0-9]{1,3}(?:\.[0-9]{1,3}){3})\.in-addr\.arpa(?![\w-])", re.I)
+# Any .arpa name. Its numbers are written backwards, so they aren't an IP (an IPv6 reverse
+# name can start 4.3.2.1.b.a...).
+ARPA_NAME = re.compile(r"(?<![\w.-])[\w.-]+\.arpa(?![\w-])", re.I)
 HASH = re.compile(r"(?<![0-9a-z])(?:[0-9a-f]{64}|[0-9a-f]{40}|[0-9a-f]{32})(?![0-9a-z])", re.I)
 
 # The ways people write an indicator so it can't be clicked: evil[.]com, evil (dot) com,
@@ -98,6 +104,10 @@ def _requested_url(href: str, host: str) -> str:
 def _ips_in(text: str) -> list[str]:
     # IPv4 by its shape, and IPv6 from runs of hex digits, colons and dots with at least two
     # colons. ipaddress decides which are real, so 999.1.1.1 and a time like 10:30:00 aren't.
+    # A reverse DNS name is swapped for its IP written forwards, with spaces so it can't join
+    # the next number, and other .arpa names are taken out.
+    text = REVERSE_DNS.sub(lambda name: " " + ".".join(reversed(name.group(1).split("."))) + " ", text)
+    text = ARPA_NAME.sub(" ", text)
     candidates = IPV4.findall(text)
     for token in re.findall(r"[0-9a-f:.]+", text, re.I):
         if token.count(":") >= 2:

@@ -114,9 +114,26 @@ def test_file_names_in_a_path_arent_domains(text, domains):
     "version 10.0.19041.1", "at 10:30:00", "MAC 00:1a:2b:3c:4d:5e", "999.1.1.1", "01.2.3.4", "1.2.3.4.5",
     # Code in alerts, which leaves ::F, d:: and ::B, all valid IPv6 addresses on their own
     "[Convert]::FromBase64String($x)", "std::string", "Foo::Bar",
+    # An IPv6 reverse DNS name, whose hex digits are written backwards and start like an IPv4 address
+    "4.3.2.1.b.a.9.8.7.6.5.0.4.0.0.0.3.0.0.0.2.0.0.0.1.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa",
 ])
 def test_numbers_that_arent_ips(text):
     assert from_text(text).ips == []
+
+
+@pytest.mark.parametrize("text, name, ip", [
+    ("DNS query 156.32.33.45.in-addr.arpa", "156.32.33.45.in-addr.arpa", "45.33.32.156"),
+    ("PTR 5.0.168.192.IN-ADDR.ARPA.", "5.0.168.192.in-addr.arpa", "192.168.0.5"),
+])
+def test_a_reverse_dns_name_gives_the_ip_it_asks_about(text, name, ip):
+    # The IP is written backwards in the name, and the numbers as written are someone else's
+    found = from_text(text)
+    assert (found.domains, found.ips) == ([name], [ip])
+
+
+def test_ips_are_listed_in_the_order_written():
+    found = from_text("10.0.0.5 asked 156.32.33.45.in-addr.arpa, then 10.0.0.9")
+    assert found.ips == ["10.0.0.5", "45.33.32.156", "10.0.0.9"]
 
 
 @pytest.mark.parametrize("text", [MD5 + "0", "g" + MD5[1:], MD5[1:]])

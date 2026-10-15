@@ -8,8 +8,9 @@ from datetime import date
 
 from .checks import run_checks
 from .domains import SUFFIX_LIST_DATE, base_domain
+from .enrich import look_up
 from .iocs import defang, from_email, from_text
-from .models import Indicators
+from .models import Indicators, Reputation
 from .parser import parse_file
 from .received import find_origin, received_warnings
 
@@ -47,7 +48,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--enrich",
         action="store_true",
-        help="look up indicator reputation (VirusTotal, AbuseIPDB). Off by default. Not built yet",
+        help="look up the indicators' reputation with VirusTotal and AbuseIPDB, using the keys in "
+             "VT_API_KEY and ABUSEIPDB_API_KEY. Off by default, so nothing goes online without it",
     )
     return parser
 
@@ -76,7 +78,7 @@ def _read_text(name: str) -> str:
     return data.decode("utf-8-sig", errors="replace")
 
 
-def _print_indicators(found: Indicators) -> None:
+def _print_indicators(found: Indicators, reputation: dict[str, list[Reputation]]) -> None:
     # Defanged, so pasting them into a ticket or a chat doesn't make live links
     rows = ([("URL", url) for url in found.urls] + [("Domain", domain) for domain in found.domains]
             + [("IP", ip) for ip in found.ips] + [("Email", email) for email in found.emails]
@@ -87,6 +89,8 @@ def _print_indicators(found: Indicators) -> None:
     print("Indicators, defanged:")
     for kind, value in rows:
         _print_escaped(f"  {kind:<8} {defang(value)}")
+        for result in reputation.get(value, []):
+            _print_escaped(f"{'':<11}{result.service}: {result.text}")
 
 
 def _note_old_suffix_list() -> None:
@@ -103,9 +107,18 @@ def main(argv=None) -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
 
     args = build_parser().parse_args(argv)
+    try:
+        return _run(args)
+    except KeyboardInterrupt:
+        # A second Ctrl+C during the lookups, or any other. 130 is the usual exit code for it.
+        print("Stopped", file=sys.stderr)
+        return 130
+
+
+def _run(args: argparse.Namespace) -> int:
     # Stop instead of quietly skipping what was asked for. "is not None" because an empty
     # value (--out "") was still asked for.
-    asked = {"--out": args.out is not None, "--json": args.json is not None, "--enrich": args.enrich}
+    asked = {"--out": args.out is not None, "--json": args.json is not None}
     not_built = [flag for flag, given in asked.items() if given]
     if not_built:
         print(f"error: not built yet: {', '.join(not_built)}", file=sys.stderr)
@@ -117,7 +130,8 @@ def main(argv=None) -> int:
         except (OSError, ValueError) as e:
             print(f"error: {e}", file=sys.stderr)
             return 1
-        _print_indicators(from_text(text))
+        found = from_text(text)
+        _print_indicators(found, look_up(found) if args.enrich else {})
         _note_old_suffix_list()
         return 0
 
@@ -152,7 +166,8 @@ def main(argv=None) -> int:
         for caveat in c.caveats:
             _print_escaped(f"{'':<23}Caveat: {caveat}")
     print()
-    _print_indicators(from_email(parsed, origin))
+    found = from_email(parsed, origin)
+    _print_indicators(found, look_up(found, parsed.attachments) if args.enrich else {})
     _note_old_suffix_list()
     return 0
 
