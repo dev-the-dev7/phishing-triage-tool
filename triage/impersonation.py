@@ -1,5 +1,6 @@
 """Checks for an email pretending to be a brand, your organization, or an executive."""
 
+import functools
 import re
 
 from .domains import (base_domain, decode_idn, is_ip, lookalike_forms, normalize_unicode,
@@ -43,7 +44,7 @@ def check_display_name(parsed: ParsedEmail) -> Check:
             continue
         if _mentions(display, target):
             hits.append(f'mentions "{target}" but the mail is from {domain}')
-        elif any(_mentions(form, target_form) for form in display_forms for target_form in lookalike_forms(target)):
+        elif any(_mentions(form, target_form) for form in display_forms for target_form in _name_forms(target)):
             hits.append(f'spells "{target}" with lookalike characters but the mail is from {domain}')
         else:
             continue
@@ -53,7 +54,7 @@ def check_display_name(parsed: ParsedEmail) -> Check:
     for executive in sorted(EXECUTIVES):
         # Each part as its own word: "Sarah Chen (CEO)" and "Chen, Sarah" both match.
         name_found = any(_has_words(form, executive_form) for form in display_forms
-                         for executive_form in lookalike_forms(executive))
+                         for executive_form in _name_forms(executive))
         if name_found and base not in own_domains:
             hits.append(f"uses executive {executive}'s name but the mail is from {domain}, outside your organization's domains")
 
@@ -65,9 +66,9 @@ def check_display_name(parsed: ParsedEmail) -> Check:
 def check_lookalike(parsed: ParsedEmail) -> Check:
     name, strength = "Lookalike domain", Strength.STRONG
     hits = []
-    targets = _impersonation_targets()
+    targets = [(target, domains, _main_domain(target, domains)) for target, domains in _impersonation_targets()]
     # A word more than one letter longer than every name can't equal one or be a typo of one
-    max_length = max(len(form) for t, _ in targets for form in lookalike_forms(t.replace(" ", ""))) + 1
+    max_length = max(len(form) for t, _, _ in targets for form in _name_forms(t.replace(" ", ""))) + 1
     for label, display_domain, base in _unlisted_domains(parsed):
         # The TLD can't hold a lookalike, and without it a brand's own TLD (applecard.apple)
         # doesn't match its name
@@ -84,20 +85,19 @@ def check_lookalike(parsed: ParsedEmail) -> Check:
         subdomains = display_domain.rstrip(".").removesuffix(base).removesuffix(".")
         # One hit per organization, since "microsoft" and "office 365" share their domains
         reported = []
-        for target, target_domains in targets:
+        for target, target_domains, main_domain in targets:
             if target_domains in reported:
                 continue
             # Without spaces, as in a domain, so "ken nelson" gives kemelson like kennelson.com
-            keywords = lookalike_forms(target.replace(" ", ""))
+            keywords = _name_forms(target.replace(" ", ""))
             # A real domain in front of someone else's is the clearest evidence, and catches
             # real domains that aren't the name (microsoftonline.com)
-            real_domain = next((d for d in target_domains if re.search(_whole_name_pattern(d), subdomains)), None)
-            main_domain = _main_domain(target, target_domains)
+            real_domain = next((d for d in target_domains if _whole_name_pattern(d).search(subdomains)), None)
             if real_domain:
                 hit = f"puts the real domain {real_domain} in front of {base}"
-            elif re.search(_whole_name_pattern(target), name_part):
+            elif _whole_name_pattern(target).search(name_part):
                 hit = f"contains '{target}' but isn't {main_domain}"
-            elif any(re.search(_whole_name_pattern(target_form), form) for target_form in lookalike_forms(target)
+            elif any(_whole_name_pattern(target_form).search(form) for target_form in _name_forms(target)
                      for form in forms):
                 hit = f"spells '{target}' with lookalike characters but isn't {main_domain}"
             elif any(_typo_or_equal(keyword, words, name_words) for keyword in keywords):
@@ -117,12 +117,13 @@ def check_brand_joined(parsed: ParsedEmail) -> Check:
     # brands own domains like this too (googleapis.com, paypalobjects.com).
     name, strength = "Brand joined to a word", Strength.WEAK
     hits = []
+    targets = [(target, domains, {k for k in _name_forms(target.replace(" ", "")) if len(k) >= LONG_NAME_LENGTH})
+               for target, domains in _impersonation_targets()]
     for label, _, base in _unlisted_domains(parsed):
         # Split on dashes only. Joining them back would flag paypal-secure.com here as well.
         name_words = {word for form in lookalike_forms(registered_name(base)) for word in form.split("-")}
         reported = []  # one hit per organization
-        for target, target_domains in _impersonation_targets():
-            keywords = {k for k in lookalike_forms(target.replace(" ", "")) if len(k) >= LONG_NAME_LENGTH}
+        for target, target_domains, keywords in targets:
             if target_domains in reported or not keywords:
                 continue
             # The name on its own (paypal-secure.com) is the lookalike check's job
@@ -216,10 +217,19 @@ def _domain_words(domain: str, max_length: int) -> list[str]:
     return words
 
 
-def _whole_name_pattern(target: str) -> str:
+@functools.cache
+def _name_forms(name: str) -> frozenset[str]:
+    # A name's lookalike spellings. These and the patterns below are worked out once, since the
+    # names only come from lists.py and every domain in the email is compared with them. Doing
+    # it for each domain took 14 seconds for 20,000.
+    return frozenset(lookalike_forms(name))
+
+
+@functools.cache
+def _whole_name_pattern(target: str) -> re.Pattern:
     # The name as its own word, with all its words in order. They can be joined by a dash
     # (wells-fargo) or a dot, since a free subdomain can supply the first word: wells.fargo-alerts.com
-    return r"(^|[.-])" + "[.-]?".join(re.escape(w) for w in target.split()) + r"($|[.-])"
+    return re.compile(r"(^|[.-])" + "[.-]?".join(re.escape(w) for w in target.split()) + r"($|[.-])")
 
 
 def _one_typo_apart(a: str, b: str) -> bool:
