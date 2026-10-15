@@ -27,9 +27,9 @@ def vt_report(malicious=0, suspicious=0, undetected=0, harmless=0, checked=CHECK
     return {"data": {"attributes": {"last_analysis_stats": stats, "last_analysis_date": checked}}}
 
 
-def abuseipdb_report(confidence=0, reports=0, users=0):
+def abuseipdb_report(confidence=0, reports=0, users=0, **more):
     return {"data": {"ipAddress": "8.8.8.8", "abuseConfidenceScore": confidence, "totalReports": reports,
-                     "numDistinctUsers": users, "countryCode": "US"}}
+                     "numDistinctUsers": users, **more}}
 
 
 def answer(status: int, body) -> MagicMock:
@@ -132,7 +132,15 @@ def test_ips_are_looked_up_with_abuseipdb_too(server, keys):
     (abuseipdb_report(confidence=25, reports=1, users=1), "reported 1 time by 1 user in the last 90 days, "
                                                           "abuse confidence 25%"),
     (abuseipdb_report(), "no reports in the last 90 days"),
-], ids=["one report", "no reports"])
+    # Google's DNS server, which people's firewalls report and AbuseIPDB lists as trusted
+    (abuseipdb_report(reports=239, users=94, isWhitelisted=True, isp="Google LLC", countryCode="US"),
+     "reported 239 times by 94 users in the last 90 days, abuse confidence 0% (on its trusted list), "
+     "Google LLC in US"),
+    (abuseipdb_report(isp=None, countryCode="NL", isWhitelisted=None), "no reports in the last 90 days, in NL"),
+    (abuseipdb_report(isp="DigitalOcean, LLC", countryCode=None), "no reports in the last 90 days, DigitalOcean, LLC"),
+    (abuseipdb_report(isWhitelisted="yes"), "no reports in the last 90 days"),
+    (abuseipdb_report(isp="  ", countryCode=" US "), "no reports in the last 90 days, in US"),
+], ids=["one report", "no reports", "trusted", "country only", "network only", "trusted only when true", "spaces"])
 def test_abuseipdb_results_in_plain_words(server, monkeypatch, report, text):
     monkeypatch.setenv("ABUSEIPDB_API_KEY", "abuseipdb-key")
     server.answers[f"{ABUSEIPDB}?8.8.8.8"] = (200, report)
@@ -441,9 +449,13 @@ def test_virustotal_answers_that_cant_be_read(server, keys, report):
     assert not enrich.CACHE_FILE.exists()
 
 
-def test_abuseipdb_answer_that_cant_be_read(server, monkeypatch):
+@pytest.mark.parametrize("report", [
+    {"data": {"abuseConfidenceScore": 50}},
+    abuseipdb_report(countryCode=840),
+], ids=["counts missing", "country as a number"])
+def test_abuseipdb_answer_that_cant_be_read(server, monkeypatch, report):
     monkeypatch.setenv("ABUSEIPDB_API_KEY", "abuseipdb-key")
-    server.answers[f"{ABUSEIPDB}?8.8.8.8"] = (200, {"data": {"abuseConfidenceScore": 50}})
+    server.answers[f"{ABUSEIPDB}?8.8.8.8"] = (200, report)
     assert texts(look_up(Indicators(ips=["8.8.8.8"])))["8.8.8.8"][0] == (
         "AbuseIPDB: unavailable, its answer couldn't be read")
 
@@ -520,21 +532,22 @@ def test_the_cache_isnt_a_list_of_what_you_looked_up(server, keys):
     look_up(Indicators(domains=["evil.com"]))
     saved = enrich.CACHE_FILE.read_text(encoding="utf-8")
     assert "evil" not in saved
-    assert json.loads(saved)["version"] == 1
+    assert json.loads(saved)["version"] == enrich.CACHE_VERSION
 
 
 def saved_entry(**entry) -> str:
     key = enrich._cache_key("VirusTotal", "domain", "evil.com")
     facts = {"malicious": 0, "suspicious": 0, "undetected": 60, "harmless": 0, "checked": ""}
-    return json.dumps({"version": 1, "lookups": {key: {"saved": 1_800_000_000.0, "facts": facts, **entry}}})
+    entry = {"saved": 1_800_000_000.0, "facts": facts, **entry}
+    return json.dumps({"version": enrich.CACHE_VERSION, "lookups": {key: entry}})
 
 
 @pytest.mark.parametrize("contents", [
     "not JSON",
     "[" * 100_000,
     "[]",
-    json.dumps({"version": 0, "lookups": {}}),
-    json.dumps({"version": 1, "lookups": []}),
+    json.dumps({"version": enrich.CACHE_VERSION - 1, "lookups": {}}),
+    json.dumps({"version": enrich.CACHE_VERSION, "lookups": []}),
     saved_entry(saved="today"),
     saved_entry(saved=1_800_000_000.0 + 60),
     saved_entry(saved=10 ** 400),

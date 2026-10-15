@@ -22,7 +22,7 @@ Work in progress. What works now, with `python -m triage path/to/email.eml`:
   email, or from alert text with `python -m triage --text alert.txt` (`-` reads standard
   input)
 - Reputation lookups with `--enrich`: VirusTotal for hashes, domains, URLs, and IPs, and
-  AbuseIPDB for IPs
+  AbuseIPDB for IPs, with each IP's network and country
 - Updating the tool's copy of the Public Suffix List with `python -m triage.update_suffixes`
 
 Planned:
@@ -265,6 +265,15 @@ includes the company's root certificate.
   date VirusTotal last checked, since a page can turn malicious after a clean scan.
   Engines that timed out or don't scan that kind of file aren't counted.
 
+- **An IP's network and country are context, not a check.** AbuseIPDB's answer names the
+  network an IP belongs to and where it is (`Google LLC in US`), and the tool shows them
+  with its reports, but nothing is flagged by country. Big providers send from their own
+  servers wherever the sender is, attackers use servers near their targets and hacked
+  accounts, and real mail passes through data centers abroad. Location is strong evidence
+  in sign-in logs (two countries an hour apart), not in email. Whether AbuseIPDB lists the
+  IP as trusted is shown too, since that's why a server like Google's 8.8.8.8 has hundreds
+  of reports and 0% confidence.
+
 - **What would tell the service about your network or your people isn't sent.** Private
   and reserved IPs and internal names (`srv01.corp.local`) mean nothing outside your
   network. Neither are your own domains in `OWN_DOMAINS`: alert text can name your
@@ -488,3 +497,6 @@ includes the company's root certificate.
   policy, help pages) to look genuine, and those would use up the lookups instead.
 
 - **A result from the cache can be up to a day old.**
+
+- **The network and country are AbuseIPDB's record of the sending server**, not of the
+  sender, and an IP's owner chooses the network name it registers.

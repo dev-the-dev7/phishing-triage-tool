@@ -49,12 +49,12 @@ MAX_ANSWER_BYTES = 5 * 1024 * 1024
 # within the hour.
 CACHE_HOURS = 24
 # Raised when what's kept for a result changes, so an older file is read as empty
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 
 # What's kept from each answer, and its type. Cached entries are checked against it too.
 FACTS = {
     "VirusTotal": {"malicious": int, "suspicious": int, "undetected": int, "harmless": int, "checked": str},
-    "AbuseIPDB": {"confidence": int, "reports": int, "users": int},
+    "AbuseIPDB": {"confidence": int, "reports": int, "users": int, "trusted": bool, "isp": str, "country": str},
 }
 
 # Domains whose reputation is already known, so they're looked up last
@@ -330,9 +330,11 @@ def _virustotal_facts(answer) -> dict:
 
 
 def _abuseipdb_facts(answer) -> dict:
+    # The network and country can be missing (null), and only a real true counts as trusted
     data = answer["data"]
     return {"confidence": data["abuseConfidenceScore"], "reports": data["totalReports"],
-            "users": data["numDistinctUsers"]}
+            "users": data["numDistinctUsers"], "trusted": data.get("isWhitelisted") is True,
+            "isp": (data.get("isp") or "").strip(), "country": (data.get("countryCode") or "").strip()}
 
 
 def _valid(service: str, facts) -> bool:
@@ -341,7 +343,7 @@ def _valid(service: str, facts) -> bool:
     # True pass as 1.
     types = FACTS[service]
     return (isinstance(facts, dict) and facts.keys() == types.keys()
-            and all(type(facts[name]) is kind and (kind is str or 0 <= facts[name] < 10 ** 9)
+            and all(type(facts[name]) is kind and (kind is not int or 0 <= facts[name] < 10 ** 9)
                     for name, kind in types.items()))
 
 
@@ -372,9 +374,16 @@ def _describe_virustotal(facts: dict) -> str:
 
 def _describe_abuseipdb(facts: dict) -> str:
     if not facts["reports"]:
-        return f"no reports in the last {ABUSEIPDB_DAYS} days"
-    return (f"reported {_count(facts['reports'], 'time')} by {_count(facts['users'], 'user')} in the last "
-            f"{ABUSEIPDB_DAYS} days, abuse confidence {facts['confidence']}%")
+        text = f"no reports in the last {ABUSEIPDB_DAYS} days"
+    else:
+        text = (f"reported {_count(facts['reports'], 'time')} by {_count(facts['users'], 'user')} in the last "
+                f"{ABUSEIPDB_DAYS} days, abuse confidence {facts['confidence']}%")
+    # Its trusted list is why Google's DNS server has hundreds of reports and 0% confidence
+    if facts["trusted"]:
+        text += " (on its trusted list)"
+    # Context, not a check: where the IP is, by AbuseIPDB's records, not where the sender is
+    network = facts["isp"] + (f" in {facts['country']}" if facts["country"] else "")
+    return f"{text}, {network.strip()}" if network else text
 
 
 def _count(number: int, word: str) -> str:

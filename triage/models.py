@@ -121,4 +121,4 @@ class Reputation:
     service: str  # VirusTotal or AbuseIPDB
     status: LookupStatus
     text: str  # what was found, or why nothing was, in plain words
-    facts: dict = field(default_factory=dict)  # the numbers a found result is written from
+    facts: dict = field(default_factory=dict)  # what a found result is written from
