@@ -9,6 +9,7 @@ from triage.checks import run_checks
 from triage.headers import check_authentication
 from triage.impersonation import check_brand_joined, check_lookalike
 from triage.iocs import from_email, from_text
+from triage.link_wrappers import destinations, unwrap
 from triage.models import Link, ParsedEmail
 from triage.parser import parse_bytes
 from triage.received import find_origin, received_warnings
@@ -76,6 +77,25 @@ def test_long_run_of_spaces_in_alert_text():
     # Defanged brackets can have spaces in front (evil [.] com), and trying every space in the
     # run as the start was quadratic
     assert seconds(lambda: from_text("a" + " " * 200_000 + "b")) < 1
+
+
+@pytest.mark.parametrize("link", [
+    # A regex matching lazily from each /v3/__ to the end would be quadratic
+    "https://urldefense.com/v3/__" + "/v3/__" * 200_000,
+    # Kysr is base64 for +++, one character for each mark
+    "https://urldefense.com/v3/__https://evil.com/" + "a*" * 100_000 + "__;" + "Kysr" * 33_334 + "!!x$",
+], ids=["no end", "many marks"])
+def test_long_proofpoint_link(link):
+    assert seconds(lambda: unwrap(link)) < 1
+
+
+def test_two_link_wrappers_nested_hundreds_deep():
+    # Encoding only % and & at each level keeps the link short enough to nest this deep.
+    # Reading every level took seconds, and twice as deep ran out of stack.
+    url = "https://evil.com/"
+    for _ in range(600):
+        url = "https://www.google.com/url?url=https://a.com/&q=" + url.replace("%", "%25").replace("&", "%26")
+    assert seconds(lambda: destinations(url)) < 1
 
 
 # The full sweep puts each pattern in every field the sender controls, at two sizes. Code

@@ -14,6 +14,8 @@ Work in progress. What works now, with `python -m triage path/to/email.eml`:
 - Lookalike domains and brands joined to other words, in the sender and in links
 - Link text that shows one domain but goes to another, and links that run a script or
   open a file share or another program
+- Links rewritten by Microsoft's Safe Links, Proofpoint, or Google's redirect, read as where
+  they really go
 - Text hidden inside words, emails that are only an image, and text added by CSS
 - The server that handed the email to your provider, found from the Received headers
 - Indicators (URLs, domains, IPs, email addresses, hashes), defanged for sharing. From an
@@ -160,6 +162,23 @@ includes the company's root certificate.
   make clickable. Links inside `<!--[if mso]>` are read too: every other client takes that
   as a comment, but Outlook for Windows shows it, so a link can be there for Outlook users
   only.
+
+- **A link rewritten by a mail security service is read as where it really goes.**
+  Microsoft Defender's Safe Links and Proofpoint rewrite every link in delivered mail to go
+  through them first, and phishing puts links behind Google's redirect
+  (`google.com/url?q=`) so they start with google.com. The tool reads the real link out of
+  each (`url=` for Safe Links, `u=` and the v3 format for Proofpoint, `q=` or `url=` for
+  Google), even when one wraps another, and the checks, the indicators, and `--enrich` all
+  use it. Alert text gets the same, since users often report the Safe Links URL they
+  clicked. The link inside is read the way a browser reads it, so a space in front or
+  `//evil.com` doesn't hide it. Only the services' own hosts are read, so
+  `safelinks.protection.outlook.com.evil.com` is checked as the link it is. A wrapper naming
+  two different links is read as a link to each, since which one the service follows isn't
+  known, so the checks, the indicators, and `--enrich` see both, and a warning names them,
+  so a "Click here" can't hide them. In a link's text, only Safe Links and Proofpoint URLs
+  are read this way, since they rewrite what a plain text part shows. A Google redirect
+  shown in the text was the sender's choice, so the reader sees google.com, and the link
+  check flags it.
 
 - **A link's text is read with and without the parts a browser hides.**
   `paypal<span style="font-size:0"> </span>.com` shows paypal.com, but read as written it's
@@ -397,12 +416,12 @@ includes the company's root certificate.
   `linkedin.com/slink`) look like they go to the brand. The evidence there is where the
   links end up.
 
-- **Links rewritten by an email security service hide where they go.** Microsoft
-  Defender's Safe Links (`safelinks.protection.outlook.com`) and Proofpoint
-  (`urldefense.com`) rewrite every link in delivered mail to go through them first. The
-  link check then flags each one, since its text shows one domain and it goes to the
-  service, and the real destination isn't listed or looked up with `--enrich`. Reading the
-  real link out of the ones that carry it is planned.
+- **Links rewritten by other services keep their wrapper.** Mimecast's links hold only a
+  token, so the real link can't be read from them, and other services' formats (Barracuda,
+  Cisco, Trend Micro), Google's redirect on its other domains (`google.co.uk/url`), and
+  Google's AMP links (`google.com/amp/s/evil.com`) aren't read yet. The link check flags
+  each one, since its text shows one domain and it goes to the service, and the real
+  destination isn't listed or looked up with `--enrich`.
 
 ### Content
 

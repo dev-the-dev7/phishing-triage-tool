@@ -3,11 +3,14 @@
 import email
 import email.policy
 import hashlib
+from dataclasses import replace
 from email.utils import getaddresses
 
 from .domains import urls_in_text
 from .html_reader import read_html
-from .models import Address, Attachment, Link, ParsedEmail
+from .iocs import defang
+from .link_wrappers import destinations
+from .models import Address, Attachment, Link, ParsedEmail, join_first_five
 
 # Microsoft 365's largest allowed message. A bigger file isn't a real email, and the
 # email library needs several times the file's size in memory.
@@ -75,6 +78,12 @@ def _parse_message(raw: bytes) -> ParsedEmail:
     text_body = "\n".join(_shown_texts(msg, "plain", warnings))
     html_parts = _shown_texts(msg, "html", warnings)
     collected = [read_html(html, warnings) for html in html_parts]
+    links = [link for part in collected for link in part.links] + _text_links(text_body)
+    # Where each link really goes, read out of Safe Links, Proofpoint or Google's redirect. A
+    # wrapper naming two different links becomes a link to each, so every check sees both.
+    places = [destinations(link.href) for link in links]
+    warnings += _unclear_link_warnings(places)
+    links = [replace(link, href=href) for link, hrefs in zip(links, places) for href in hrefs]
 
     return ParsedEmail(
         from_addr=from_list[0] if from_list else None,
@@ -94,7 +103,7 @@ def _parse_message(raw: bytes) -> ParsedEmail:
         hidden_in_words=[found for part in collected for found in part.hidden_in_words],
         css_added_text=list(dict.fromkeys(text for part in collected for text in part.css_added_text)),
         html_images=sum(part.images for part in collected),
-        links=[link for part in collected for link in part.links] + _text_links(text_body),
+        links=links,
         other_urls=[url for part in collected for url in part.other_urls],
         attachments=_attachments(msg),
         parse_warnings=warnings,
@@ -215,6 +224,16 @@ def _own_parts(msg) -> list:
 def _text_links(text: str) -> list[Link]:
     # Mail clients make these clickable, and open a www. link with no scheme as http
     return [Link("http://" + url if url.lower().startswith("www.") else url, url) for url in urls_in_text(text)]
+
+
+def _unclear_link_warnings(places: list[list[str]]) -> list[str]:
+    # Behind text like "Click here", nothing else would point out a link that can go to more
+    # than one place. Defanged, so the terminal doesn't make them live.
+    unclear = list(dict.fromkeys(" or ".join(map(defang, hrefs)) for hrefs in places if len(hrefs) > 1))
+    if not unclear:
+        return []
+    return [f"Where a link goes isn't known, since it names more than one place: {join_first_five(unclear)}. "
+            "Check it by hand."]
 
 
 def _attached_emails(msg) -> list[str]:

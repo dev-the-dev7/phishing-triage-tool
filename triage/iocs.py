@@ -5,6 +5,7 @@ import re
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 from .domains import TEXT_URL, ascii_domain, browser_url, domains_in_text, is_ip, url_host, urls_in_text
+from .link_wrappers import destinations
 from .models import Indicators, Origin, ParsedEmail
 
 EMAIL = re.compile(r"(?<![\w.+%-])[\w.+%-]+@[\w-]+(?:\.[\w-]+)+")
@@ -61,11 +62,12 @@ def from_text(text: str) -> Indicators:
     text = refang(text)
     urls, hosts = [], []
     for url in urls_in_text(text):
-        # A www. link with no scheme opens as http
-        href = "http://" + url if url.lower().startswith("www.") else url
-        host = url_host(href)
-        urls.append(_requested_url(href, host) if host else href)
-        hosts.append(host)
+        # A www. link with no scheme opens as http, and a wrapped one is read as where it goes,
+        # since users often report the Safe Links URL they clicked
+        for href in destinations("http://" + url if url.lower().startswith("www.") else url):
+            host = url_host(href)
+            urls.append(_requested_url(href, host) if host else href)
+            hosts.append(host)
     text = TEXT_URL.sub(" ", text)
     emails = EMAIL.findall(text)
     hosts += [email.rpartition("@")[2] for email in emails]

@@ -87,6 +87,19 @@ def test_urls_in_text(text, url, host):
     assert (found.urls, found.domains) == ([url], [host])
 
 
+def test_a_wrapped_link_in_alert_text_is_read_as_where_it_goes():
+    # The reader's address in data= isn't listed
+    found = from_text("User clicked https://nam02.safelinks.protection.outlook.com/?url=https%3A%2F%2Fevil.com"
+                      "%2Flogin&data=05%7C02%7Cjordan.lee%40example.com%7C0&reserved=0 at 10:30")
+    assert (found.urls, found.domains, found.emails) == (["https://evil.com/login"], ["evil.com"], [])
+
+
+def test_both_links_a_wrapper_in_alert_text_names_are_listed():
+    found = from_text("User clicked https://www.google.com/url?q=https://www.paypal.com/&url=https://evil.com/")
+    assert (found.urls, found.domains) == (["https://evil.com/", "https://www.paypal.com/"],
+                                           ["evil.com", "www.paypal.com"])
+
+
 def test_url_with_an_ip_host():
     found = from_text("http://0xd83ad604/x and http://[2001:DB8::1]:8080/y")
     assert (found.urls, found.ips) == (["http://216.58.214.4/x", "http://[2001:db8::1]:8080/y"],

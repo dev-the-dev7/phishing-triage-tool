@@ -4,6 +4,7 @@ the link open a web page at all."""
 import re
 
 from .domains import TAB_OR_NEWLINE, TEXT_URL, base_domain, decode_idn, domains_in_text, url_host
+from .link_wrappers import unwrap
 from .models import Check, ParsedEmail, Result, Strength, join_first_five
 
 # Links that open a web page, an empty one (about:blank), an email, a call, a text or an
@@ -60,8 +61,13 @@ def check_link_mismatch(parsed: ParsedEmail) -> Check:
 
 def _shown_domain(text: str) -> str | None:
     # A URL is only read up to its path, since the reader takes the start as the site:
-    # https://paypal.com@evil.com/ shows paypal.com
-    text = TEXT_URL.sub(lambda m: re.match(r"(?:https?:/*)?[^/\\?#]*", m.group(), re.I).group(), text)
+    # https://paypal.com@evil.com/ shows paypal.com. Safe Links and Proofpoint rewrite the URLs
+    # a plain text part shows too, so those are read as where they go. A Google redirect isn't,
+    # since the sender chose it and the reader sees google.com.
+    def site(url: re.Match) -> str:
+        return re.match(r"(?:https?:/*)?[^/\\?#]*", unwrap(url.group(), redirects=False), re.I).group()
+
+    text = TEXT_URL.sub(site, text)
     return next(iter(domains_in_text(text)), None)
 
 

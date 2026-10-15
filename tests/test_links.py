@@ -1,9 +1,13 @@
 """Tests for links: finding them the way a mail client shows them (parser.py and
 html_reader.py), and link text that shows one domain but goes to another (links.py)."""
 
+from urllib.parse import quote
+
 import pytest
 
 from triage import html_reader
+from triage.impersonation import check_lookalike
+from triage.iocs import from_email
 from triage.links import check_link_mismatch, check_link_type
 from triage.models import Link, ParsedEmail, Result
 from triage.parser import parse_bytes
@@ -247,6 +251,66 @@ def test_plain_text_url_with_a_login_part():
 ])
 def test_url_in_the_text_is_read_up_to_its_path(href, text):
     assert mismatch(href, text).result == Result.PASS
+
+
+def safe_link(url: str) -> str:
+    return "https://nam02.safelinks.protection.outlook.com/?url=" + quote(url, safe="") + "&amp;data=x&amp;reserved=0"
+
+
+@pytest.mark.parametrize("goes_to, result, evidence", [
+    ("https://www.paypal.com/signin", Result.PASS, "No link shows one domain and goes to another"),
+    ("https://evil.com/", Result.FLAG, "text shows www.paypal.com but goes to evil.com"),
+])
+def test_a_wrapped_link_is_checked_where_it_really_goes(goes_to, result, evidence):
+    parsed = html_email(f'<a href="{safe_link(goes_to)}">www.paypal.com</a>')
+    assert links_in(parsed) == [(goes_to, "www.paypal.com")]
+    check = check_link_mismatch(parsed)
+    assert (check.result, check.evidence) == (result, evidence)
+
+
+def test_a_wrapped_url_in_plain_text_matches_where_it_goes():
+    # Safe Links rewrites a plain text part's URLs too
+    url = safe_link("https://www.paypal.com/").replace("&amp;", "&")
+    parsed = parse_bytes((HEADERS + f"\r\nSign in at {url} today").encode())
+    assert links_in(parsed) == [("https://www.paypal.com/", url)]
+    assert check_link_mismatch(parsed).result == Result.PASS
+
+
+def test_a_wrapper_naming_two_links_is_a_link_to_each():
+    parsed = html_email('<a href="https://www.google.com/url?q=https://www.paypal.com/&amp;url=https://paypa1.com/">'
+                        'www.paypal.com</a>')
+    assert links_in(parsed) == [("https://paypa1.com/", "www.paypal.com"), ("https://www.paypal.com/", "www.paypal.com")]
+    assert check_link_mismatch(parsed).evidence == "text shows www.paypal.com but goes to paypa1.com"
+    assert check_lookalike(parsed).result == Result.FLAG
+    assert from_email(parsed, None).urls == ["https://paypa1.com/", "https://www.paypal.com/"]
+
+
+def test_a_wrapper_naming_two_links_warns():
+    two = '<a href="https://www.google.com/url?q=https://www.paypal.com/&amp;url=https://evil.com/">Click here</a>'
+    assert html_email(two * 2).parse_warnings == [
+        "Where a link goes isn't known, since it names more than one place: hxxps://evil[.]com/ or "
+        "hxxps://www[.]paypal[.]com/. Check it by hand."]
+
+
+def test_many_wrappers_naming_two_links_give_one_warning():
+    links = "".join(f'<a href="https://www.google.com/url?q=https://a{n}.com/&amp;url=https://b{n}.com/">x</a>'
+                    for n in range(7))
+    first_five = "; ".join(f"hxxps://a{n}[.]com/ or hxxps://b{n}[.]com/" for n in range(5))
+    assert html_email(links).parse_warnings == [
+        f"Where a link goes isn't known, since it names more than one place: {first_five} (and 2 more). "
+        "Check it by hand."]
+
+
+def test_a_google_redirect_shown_in_text_flags():
+    parsed = parse_bytes((HEADERS + "\r\nSign in at https://www.google.com/url?q=https://evil.com/login today").encode())
+    assert check_link_mismatch(parsed).evidence == "text shows www.google.com but goes to evil.com"
+
+
+def test_a_lookalike_behind_a_wrapper_is_found():
+    # The wrapper is Microsoft's, and where the link goes is the phisher's
+    parsed = html_email(f'<a href="{safe_link("https://paypa1.com/login")}">Sign in</a>')
+    assert check_lookalike(parsed).evidence == (
+        "paypa1.com [link] spells 'paypal' with lookalike characters but isn't paypal.com")
 
 
 @pytest.mark.parametrize("href, evidence", [
