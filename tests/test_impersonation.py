@@ -141,6 +141,15 @@ def test_evidence_says_how_the_domain_looks_alike(domain, evidence):
     assert check_lookalike(link_to(domain)).evidence == evidence
 
 
+def test_flags_name_their_domains():
+    # So --enrich looks them up first
+    parsed = ParsedEmail(links=[Link("https://paypa1.com/", ""), Link("https://paypalsecure.com/", ""),
+                                Link("https://example.com/", "")])
+    assert check_lookalike(parsed).domains == ["paypa1.com"]
+    assert check_brand_joined(parsed).domains == ["paypalsecure.com"]
+    assert check_lookalike(link_to("example.com")).domains == []
+
+
 @pytest.mark.parametrize("domain, real_domain", [
     ("login.microsoftonline.com.evil.net", "microsoftonline.com"),
     ("facebookmail.com.evil.net", "facebookmail.com"),

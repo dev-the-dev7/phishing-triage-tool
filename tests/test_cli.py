@@ -303,7 +303,7 @@ def test_enrich_results_go_under_each_indicator(capsys, tmp_path, monkeypatch):
 def test_enrich_is_given_the_attachments(capsys, tmp_path, monkeypatch):
     # Used to put pictures, like a signature's logo, after the links
     given = []
-    monkeypatch.setattr(cli, "look_up", lambda found, attachments=None: given.append(attachments) or {})
+    monkeypatch.setattr(cli, "look_up", lambda found, attachments=None, flagged=None: given.append(attachments) or {})
     path = write_email(tmp_path, (
         "From: a@example.org\r\nTo: someone@example.net\r\nSubject: s\r\n"
         'Content-Type: multipart/related; boundary="B"\r\n\r\n'
@@ -312,6 +312,17 @@ def test_enrich_is_given_the_attachments(capsys, tmp_path, monkeypatch):
     ))
     assert run(capsys, path, "--enrich")[0] == 0
     assert [attachment.filename for attachment in given[0]] == ["image001.png"]
+
+
+def test_enrich_checks_how_new_the_domains_are(capsys, monkeypatch):
+    # The lookalike check's domain is looked up first, and the age check prints after the lookups
+    given = []
+    monkeypatch.setattr(cli, "look_up", lambda found, attachments=None, flagged=None: given.append(flagged) or {})
+    _, out, _ = run(capsys, FIXTURES / "suspicious.eml", "--enrich")
+    assert given == [["paypa1.com"]]
+    assert out.splitlines()[-1] == ("  INCONCLUSIVE medium  Newly registered domain: No registration date for "
+                                    "paypa1.com; bit.ly")
+    assert "Newly registered domain" not in run(capsys, FIXTURES / "suspicious.eml")[1]
 
 
 def test_a_second_ctrl_c_stops_without_a_traceback(capsys, tmp_path, monkeypatch):

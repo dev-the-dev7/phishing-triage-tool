@@ -8,9 +8,9 @@ from datetime import date
 
 from .checks import run_checks
 from .domains import SUFFIX_LIST_DATE, base_domain
-from .enrich import look_up
+from .enrich import check_domain_age, look_up
 from .iocs import defang, from_email, from_text
-from .models import Indicators, Reputation
+from .models import Check, Indicators, Reputation, Result
 from .parser import parse_file
 from .received import find_origin, received_warnings
 
@@ -92,6 +92,12 @@ def _print_indicators(found: Indicators, reputation: dict[str, list[Reputation]]
             _print_escaped(f"{'':<11}{result.service}: {result.text}")
 
 
+def _print_check(check: Check) -> None:
+    _print_escaped(f"  {check.result.upper():<12} {check.strength:<7} {check.name}: {check.evidence}")
+    for caveat in check.caveats:
+        _print_escaped(f"{'':<23}Caveat: {caveat}")
+
+
 def _note_old_suffix_list() -> None:
     # About the tool's copy, not the email, so it goes to stderr and stays out of the results
     if SUFFIX_LIST_DATE and (date.today() - SUFFIX_LIST_DATE).days > OLD_SUFFIX_LIST_DAYS:
@@ -160,13 +166,20 @@ def _run(args: argparse.Namespace) -> int:
         _print_escaped(f"Warning:     {w}")
 
     print()
-    for c in run_checks(parsed):
-        _print_escaped(f"  {c.result.upper():<12} {c.strength:<7} {c.name}: {c.evidence}")
-        for caveat in c.caveats:
-            _print_escaped(f"{'':<23}Caveat: {caveat}")
+    checks = run_checks(parsed)
+    for check in checks:
+        _print_check(check)
     print()
     found = from_email(parsed, origin)
-    _print_indicators(found, look_up(found, parsed.attachments) if args.enrich else {})
+    if args.enrich:
+        # Lookalike domains are looked up first, and the age check needs the lookups' results
+        flagged = [domain for check in checks if check.result == Result.FLAG for domain in check.domains]
+        results = look_up(found, parsed.attachments, flagged)
+        _print_indicators(found, results)
+        print()
+        _print_check(check_domain_age(found, results))
+    else:
+        _print_indicators(found, {})
     _note_old_suffix_list()
     return 0
 

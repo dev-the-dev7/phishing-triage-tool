@@ -9,8 +9,8 @@ import pytest
 import requests
 
 from triage import enrich
-from triage.enrich import look_up
-from triage.models import Attachment, Indicators, LookupStatus
+from triage.enrich import check_domain_age, look_up
+from triage.models import Attachment, Indicators, LookupStatus, Reputation, Result
 
 VT = "https://www.virustotal.com/api/v3"
 ABUSEIPDB = "https://api.abuseipdb.com/api/v2/check"
@@ -20,11 +20,14 @@ CHECKED = 1791797400
 NOT_FOUND = (404, {"error": {"code": "NotFoundError", "message": "not found"}})
 
 
-def vt_report(malicious=0, suspicious=0, undetected=0, harmless=0, checked=CHECKED):
+def vt_report(malicious=0, suspicious=0, undetected=0, harmless=0, checked=CHECKED, created=None):
     # Engines that timed out are in the stats too, and aren't counted
     stats = {"malicious": malicious, "suspicious": suspicious, "undetected": undetected, "harmless": harmless,
              "timeout": 3}
-    return {"data": {"attributes": {"last_analysis_stats": stats, "last_analysis_date": checked}}}
+    attributes = {"last_analysis_stats": stats, "last_analysis_date": checked}
+    if created is not None:
+        attributes["creation_date"] = created
+    return {"data": {"attributes": attributes}}
 
 
 def abuseipdb_report(confidence=0, reports=0, users=0, **more):
@@ -91,7 +94,7 @@ def test_a_file_is_looked_up_by_its_hash(server, keys):
                                     "last checked 2026-10-12"]}
     assert results[SHA][0].status == LookupStatus.FOUND
     assert results[SHA][0].facts == {"malicious": 5, "suspicious": 2, "undetected": 60, "harmless": 0,
-                                     "checked": "2026-10-12"}
+                                     "checked": "2026-10-12", "registered": ""}
     # A GET with the key in a header, never in the address, and no redirects the key could follow
     assert server.requests == [(f"{VT}/files/{SHA}", {"headers": {"x-apikey": "vt-key"}, "params": None,
                                                       "timeout": 20, "stream": True, "allow_redirects": False})]
@@ -156,6 +159,68 @@ def test_abuseipdb_results_in_plain_words(server, monkeypatch, report, text):
 def test_virustotal_results_in_plain_words(server, keys, report, text):
     server.answers[f"{VT}/domains/evil.com"] = (200, report)
     assert texts(look_up(Indicators(domains=["evil.com"]))) == {"evil.com": [f"VirusTotal: {text}"]}
+
+
+# 2027-01-10 00:00 UTC, five days before the test clock's 2027-01-15
+CREATED_LAST_WEEK = 1_799_539_200
+
+
+def test_a_domains_registration_date_is_shown(server, keys):
+    server.answers[f"{VT}/domains/evil.com"] = (200, vt_report(undetected=60, created=CREATED_LAST_WEEK))
+    assert texts(look_up(Indicators(domains=["evil.com"]))) == {
+        "evil.com": ["VirusTotal: 0 of 60 engines flagged it malicious, last checked 2026-10-12, registered 2027-01-10"]}
+
+
+def test_a_files_creation_date_isnt_a_registration(server, keys):
+    # It's when the program was built
+    server.answers[f"{VT}/files/{SHA}"] = (200, vt_report(undetected=60, created=CREATED_LAST_WEEK))
+    assert "registered" not in texts(look_up(Indicators(hashes=[SHA])))[SHA][0]
+
+
+@pytest.mark.parametrize("created", ["2004-03-01", 10 ** 20], ids=["as text", "too big"])
+def test_a_registration_date_that_doesnt_read_is_left_out(server, keys, created):
+    # It comes from whois records, so the engines' verdicts still count
+    server.answers[f"{VT}/domains/evil.com"] = (200, vt_report(undetected=60, created=created))
+    assert texts(look_up(Indicators(domains=["evil.com"]))) == {
+        "evil.com": ["VirusTotal: 0 of 60 engines flagged it malicious, last checked 2026-10-12"]}
+
+
+def registered(on: str) -> list[Reputation]:
+    return [Reputation("VirusTotal", LookupStatus.FOUND, "", {"registered": on})]
+
+
+@pytest.mark.parametrize("domains, results, result, evidence", [
+    (["evil.com", "old.com"], {"evil.com": registered("2027-01-10"), "old.com": registered("2004-03-01")},
+     Result.FLAG, "evil.com was registered 2027-01-10, 5 days ago"),
+    (["evil.com"], {"evil.com": registered("2027-01-15")}, Result.FLAG, "evil.com was registered 2027-01-15, today"),
+    (["evil.com"], {"evil.com": registered("2026-12-17")}, Result.FLAG,
+     "evil.com was registered 2026-12-17, 29 days ago"),
+    (["evil.com"], {"evil.com": registered("2026-12-16")}, Result.PASS,
+     "Every domain was registered at least 30 days ago: evil.com 2026-12-16"),
+    # A new one is flagged even when another has no date
+    (["evil.com", "x.com"], {"evil.com": registered("2027-01-14")}, Result.FLAG,
+     "evil.com was registered 2027-01-14, 1 day ago"),
+    (["evil.com", "x.com"], {"evil.com": registered("2004-03-01")}, Result.INCONCLUSIVE,
+     "No registration date for x.com"),
+    (["x.com"], {"x.com": [Reputation("VirusTotal", LookupStatus.NOT_FOUND, "not found (unknown, not clean)")]},
+     Result.INCONCLUSIVE, "No registration date for x.com"),
+    # From an edited cache, and in the future
+    (["x.com"], {"x.com": registered("soon")}, Result.INCONCLUSIVE, "No registration date for x.com"),
+    (["x.com"], {"x.com": registered("2030-01-01")}, Result.INCONCLUSIVE,
+     "No registration date for x.com"),
+    # Well-known and internal names aren't in question
+    (["paypal.com", "gmail.com", "srv01.corp.local"], {}, Result.PASS,
+     "No sender or link domain besides well-known ones and your own"),
+], ids=["new", "today", "29 days", "30 days", "new and no date", "old and no date", "not found", "date doesn't read",
+        "date in the future", "nothing in question"])
+def test_domain_age(domains, results, result, evidence):
+    check = check_domain_age(Indicators(domains=domains), results)
+    assert (check.result, check.evidence) == (result, evidence)
+
+
+def test_your_own_domains_age_isnt_in_question(monkeypatch):
+    monkeypatch.setattr(enrich, "OWN_DOMAINS", ["contoso.com"])
+    assert check_domain_age(Indicators(domains=["mail.contoso.com"]), {}).result == Result.PASS
 
 
 def test_not_found_is_unknown_and_not_saved(server, keys):
@@ -319,6 +384,14 @@ def test_a_hash_another_file_has_isnt_a_picture(server, keys):
     attachments = [Attachment("logo.png", "image/png", 100, SHA), Attachment("invoice.html", "text/html", 100, SHA)]
     look_up(Indicators(hashes=[SHA], domains=["sender.net"]), attachments)
     assert server.asked() == [f"{VT}/files/{SHA}", f"{VT}/domains/sender.net"]
+
+
+def test_flagged_lookalikes_go_first(server, keys):
+    # Their age is the best evidence for or against them, so a long email can't push them out.
+    # The checks name a domain the way it displays.
+    found = Indicators(domains=["sender.net", "xn--pypal-4ve.com", "paypa1.com"])
+    look_up(found, flagged=["p\N{CYRILLIC SMALL LETTER A}ypal.com", "paypa1.com."])
+    assert server.asked() == [f"{VT}/domains/xn--pypal-4ve.com", f"{VT}/domains/paypa1.com", f"{VT}/domains/sender.net"]
 
 
 def test_waits_only_as_long_as_it_needs(server, keys, capsys, clock):
@@ -537,7 +610,7 @@ def test_the_cache_isnt_a_list_of_what_you_looked_up(server, keys):
 
 def saved_entry(**entry) -> str:
     key = enrich._cache_key("VirusTotal", "domain", "evil.com")
-    facts = {"malicious": 0, "suspicious": 0, "undetected": 60, "harmless": 0, "checked": ""}
+    facts = {"malicious": 0, "suspicious": 0, "undetected": 60, "harmless": 0, "checked": "", "registered": ""}
     entry = {"saved": 1_800_000_000.0, "facts": facts, **entry}
     return json.dumps({"version": enrich.CACHE_VERSION, "lookups": {key: entry}})
 

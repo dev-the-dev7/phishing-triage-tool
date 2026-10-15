@@ -50,6 +50,7 @@ class Check:
     # What the result doesn't cover, for the analyst to look at whatever it says. A caveat is
     # never why the check got its result: when it can't tell, it's inconclusive.
     caveats: list[str] = field(default_factory=list)
+    domains: list[str] = field(default_factory=list)  # the domains a flag is about, looked up first
 
     def __post_init__(self):
         # Turns "flag" into Result.FLAG, and raises ValueError on a typo like "fail"

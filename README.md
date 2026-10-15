@@ -22,7 +22,8 @@ Work in progress. What works now, with `python -m triage path/to/email.eml`:
   email, or from alert text with `python -m triage --text alert.txt` (`-` reads standard
   input)
 - Reputation lookups with `--enrich`: VirusTotal for hashes, domains, URLs, and IPs, and
-  AbuseIPDB for IPs, with each IP's network and country
+  AbuseIPDB for IPs, with each IP's network and country, and a check for domains
+  registered in the last 30 days
 - Updating the tool's copy of the Public Suffix List with `python -m triage.update_suffixes`
 
 Planned:
@@ -274,6 +275,19 @@ includes the company's root certificate.
   IP as trusted is shown too, since that's why a server like Google's 8.8.8.8 has hundreds
   of reports and 0% confidence.
 
+- **A domain registered in the last 30 days is flagged.** Most phishing domains are used
+  within days of being registered, and 30 days is a common cut-off for newly registered
+  domains in mail and web filters. The date comes from VirusTotal's domain report, so it
+  costs no extra lookup, and it's shown on each domain's line as well. An old domain counts
+  too: a lookalike registered in 2004 is likelier to be a real business one letter from a
+  brand (`netflux.com`), and no rule about spelling can tell that apart. So the check
+  passes when every domain is older, with each one's date in the evidence, and is
+  inconclusive when a domain has no date or wasn't looked up. It's medium strength, since
+  real companies register new domains for campaigns too. Domains the lookalike and
+  brand-joined checks flagged are looked up straight after attachments, so an email with
+  many links can't push them past the limit. The brands' domains, webmail, your own, and
+  names that aren't sent aren't in question.
+
 - **What would tell the service about your network or your people isn't sent.** Private
   and reserved IPs and internal names (`srv01.corp.local`) mean nothing outside your
   network. Neither are your own domains in `OWN_DOMAINS`: alert text can name your
@@ -289,20 +303,21 @@ includes the company's root certificate.
 - **The free limits decide the order.** VirusTotal's free key allows 4 lookups a minute and
   500 a day, so a run sends at most 8, waiting when it has to, and AbuseIPDB gets at most
   10. AbuseIPDB has no limit a minute, so its lookups go first and are done before any
-  wait. For VirusTotal, attachments go first, then the sender's domains, the domains links
-  go to, the links, pictures, and IPs, which AbuseIPDB covers too. The sender's domains
-  come before the links' because there are only one to three, and an email can link to a
-  dozen domains and use up every lookup. Pictures are mostly logos, like the ones in an
-  Outlook signature, and VirusTotal rarely has them. A picture is declared as one and named
-  like one (`.png`, `.jpg`), so it opens in a picture viewer and can't run. An SVG can hold
-  scripts, so it goes first with the other files. The brands' real domains, free webmail,
-  and links to them go last. Anything past the limit is shown as skipped. A run only counts
-  its own lookups, so one started straight after another can find VirusTotal's minute used
-  up. It then waits a minute and tries once more, and if it's refused again, the day's
-  limit was reached. When a key is refused, the day's limit is reached, a service can't be
-  reached, or a proxy or sign-in page answers for it, the rest of its lookups show as
-  unavailable without being sent. Ctrl+C during a wait does the same for both services, so
-  the indicators are still shown, and a second Ctrl+C stops the tool.
+  wait. For VirusTotal, attachments go first, then domains the lookalike and brand-joined
+  checks flagged, the sender's domains, the domains links go to, the links, pictures, and
+  IPs, which AbuseIPDB covers too. The sender's domains come before the links' because
+  there are only one to three, and an email can link to a dozen domains and use up every
+  lookup. Pictures are mostly logos, like the ones in an Outlook signature, and VirusTotal
+  rarely has them. A picture is declared as one and named like one (`.png`, `.jpg`), so it
+  opens in a picture viewer and can't run. An SVG can hold scripts, so it goes first with
+  the other files. The brands' real domains, free webmail, and links to them go last.
+  Anything past the limit is shown as skipped. A run only counts its own lookups, so one
+  started straight after another can find VirusTotal's minute used up. It then waits a
+  minute and tries once more, and if it's refused again, the day's limit was reached. When
+  a key is refused, the day's limit is reached, a service can't be reached, or a proxy or
+  sign-in page answers for it, the rest of its lookups show as unavailable without being
+  sent. Ctrl+C during a wait does the same for both services, so the indicators are still
+  shown, and a second Ctrl+C stops the tool.
 
 - **Found results are kept for a day** in your own cache folder
   (`%LOCALAPPDATA%\phishing-triage` on Windows), so running the tool again doesn't use up
@@ -500,3 +515,7 @@ includes the company's root certificate.
 
 - **The network and country are AbuseIPDB's record of the sending server**, not of the
   sender, and an IP's owner chooses the network name it registers.
+
+- **Domain age needs `--enrich`, and only covers the domains that were looked up.** Some
+  domains have no registration date in VirusTotal, and that check is then inconclusive. A
+  phishing site on a hacked or long-held domain is old, so it passes.

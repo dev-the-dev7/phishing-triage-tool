@@ -9,7 +9,8 @@ import os
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from functools import partial
 from pathlib import Path
 from urllib.parse import quote, unquote
 
@@ -18,7 +19,7 @@ import requests
 from .domains import TLDS, ascii_domain, base_domain, decode_idn, is_ip, url_host
 from .iocs import EMAIL
 from .lists import BRANDS, FREE_EMAIL_DOMAINS, OWN_DOMAINS
-from .models import Attachment, Indicators, LookupStatus, Reputation
+from .models import Attachment, Check, Indicators, LookupStatus, Reputation, Result, Strength, join_first_five
 
 # A file is looked up by its hash and never uploaded, since an upload is shared with every
 # VirusTotal customer. Scanning a URL would take a POST, so a URL VirusTotal hasn't seen
@@ -38,6 +39,9 @@ LIMIT_MINUTE = 61
 MAX_ABUSEIPDB_LOOKUPS = 10
 # Only reports from the last 90 days count, since an IP abused long ago may have a new owner
 ABUSEIPDB_DAYS = 90
+# A domain registered this recently is flagged, a common cut-off for newly registered
+# domains in mail and web filters
+NEW_DOMAIN_DAYS = 30
 
 # Seconds to wait for a server to connect, or to send more, before giving up
 TIMEOUT = 20
@@ -49,11 +53,12 @@ MAX_ANSWER_BYTES = 5 * 1024 * 1024
 # within the hour.
 CACHE_HOURS = 24
 # Raised when what's kept for a result changes, so an older file is read as empty
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 
 # What's kept from each answer, and its type. Cached entries are checked against it too.
 FACTS = {
-    "VirusTotal": {"malicious": int, "suspicious": int, "undetected": int, "harmless": int, "checked": str},
+    "VirusTotal": {"malicious": int, "suspicious": int, "undetected": int, "harmless": int, "checked": str,
+                   "registered": str},
     "AbuseIPDB": {"confidence": int, "reports": int, "users": int, "trusted": bool, "isp": str, "country": str},
 }
 
@@ -98,15 +103,17 @@ class _NoAnswer(Exception):
         self.stop = stop
 
 
-def look_up(found: Indicators, attachments: list[Attachment] | None = None) -> dict[str, list[Reputation]]:
+def look_up(found: Indicators, attachments: list[Attachment] | None = None,
+            flagged: list[str] | None = None) -> dict[str, list[Reputation]]:
     # Each indicator's results, by its value. Email addresses aren't looked up, but their
-    # domains are. The attachments are only used to tell pictures from other files.
+    # domains are. The attachments are only used to tell pictures from other files, and
+    # flagged are the domains the lookalike and brand-joined checks flagged.
     virustotal = _Service("VirusTotal", "VT_API_KEY", MAX_VT_LOOKUPS, VT_PER_MINUTE)
     abuseipdb = _Service("AbuseIPDB", "ABUSEIPDB_API_KEY", MAX_ABUSEIPDB_LOOKUPS)
     # AbuseIPDB first: it has no limit a minute, so its lookups are done before any wait for
     # VirusTotal that Ctrl+C might cut short
-    lookups = ([(abuseipdb, "ip", ip) for ip in found.ips]
-               + [(virustotal, kind, value) for kind, value in _virustotal_order(found, attachments or [])])
+    order = _virustotal_order(found, attachments or [], flagged or [])
+    lookups = [(abuseipdb, "ip", ip) for ip in found.ips] + [(virustotal, kind, value) for kind, value in order]
     cache = _read_cache()
     before = dict(cache)
     results = {}
@@ -127,16 +134,60 @@ def look_up(found: Indicators, attachments: list[Attachment] | None = None) -> d
     return results
 
 
-def _virustotal_order(found: Indicators, attachments: list[Attachment]) -> list[tuple[str, str]]:
+def check_domain_age(found: Indicators, results: dict[str, list[Reputation]]) -> Check:
+    # Most phishing domains are used within days of being registered, and an old one makes a
+    # lookalike likelier to be a real business. The brands' domains, webmail, your own, and
+    # names that aren't sent aren't in question.
+    name, strength = "Newly registered domain", Strength.MEDIUM
+    today = datetime.fromtimestamp(time.time(), timezone.utc).date()
+    new, old, unknown = [], [], []
+    for domain in found.domains:
+        if _not_sent_because("domain", domain) or _well_known(("domain", domain)):
+            continue
+        registered = _registered(domain, results)
+        if registered is None or registered > today:
+            unknown.append(domain)
+        elif registered == today:
+            new.append(f"{domain} was registered {registered}, today")
+        elif (today - registered).days < NEW_DOMAIN_DAYS:
+            new.append(f"{domain} was registered {registered}, {_count((today - registered).days, 'day')} ago")
+        else:
+            old.append(f"{domain} {registered}")
+    if new:
+        return Check(name, Result.FLAG, strength, join_first_five(new))
+    if unknown:
+        return Check(name, Result.INCONCLUSIVE, strength, f"No registration date for {join_first_five(unknown)}")
+    if old:
+        return Check(name, Result.PASS, strength, f"Every domain was registered at least {NEW_DOMAIN_DAYS} days ago: "
+                                                  f"{join_first_five(old)}")
+    return Check(name, Result.PASS, strength, "No sender or link domain besides well-known ones and your own")
+
+
+def _registered(domain: str, results: dict[str, list[Reputation]]) -> date | None:
+    # From the domain's VirusTotal result. A cached one could have been edited, so a date that
+    # doesn't read counts as none.
+    for result in results.get(domain, []):
+        if result.service == "VirusTotal" and result.facts.get("registered"):
+            try:
+                return date.fromisoformat(result.facts["registered"])
+            except ValueError:
+                return None
+    return None
+
+
+def _virustotal_order(found: Indicators, attachments: list[Attachment], flagged: list[str]) -> list[tuple[str, str]]:
     # Only MAX_VT_LOOKUPS are sent, so what's most likely to matter goes first: attachments,
-    # sender domains (only one to three), link domains, links (often made for each reader, so
-    # rarely known), pictures (mostly signature logos), then IPs, which AbuseIPDB covers too.
-    link_domains = {ascii_domain(host.lower()) for host in map(url_host, found.urls) if host}
+    # flagged lookalikes (their age is the best evidence for or against them), sender domains
+    # (only one to three), link domains, links (often made for each reader, so rarely known),
+    # pictures (mostly signature logos), then IPs, which AbuseIPDB covers too.
+    flagged = {ascii_domain(domain.lower().rstrip(".")) for domain in flagged}
+    link_domains = {ascii_domain(host.lower()) for host in map(url_host, found.urls) if host} - flagged
     # A hash counts as a picture only when no other kind of file has it
     files = {attachment.sha256 for attachment in attachments if not _is_picture(attachment)}
     pictures = {attachment.sha256 for attachment in attachments} - files
     lookups = ([("file", sha) for sha in found.hashes if sha not in pictures]
-               + [("domain", domain) for domain in found.domains if domain not in link_domains]
+               + [("domain", domain) for domain in found.domains if domain in flagged]
+               + [("domain", domain) for domain in found.domains if domain not in flagged | link_domains]
                + [("domain", domain) for domain in found.domains if domain in link_domains]
                + [("url", url) for url in found.urls]
                + [("file", sha) for sha in found.hashes if sha in pictures]
@@ -232,7 +283,7 @@ def _ask(service: _Service, kind: str, value: str) -> dict | None:
     # The facts from the service's answer, or None when it has never seen the indicator
     if service.name == "VirusTotal":
         status, answer = _get(service, f"{VT_API}/{_virustotal_path(kind, value)}", {"x-apikey": service.key})
-        read = _virustotal_facts
+        read = partial(_virustotal_facts, kind=kind)
     else:
         status, answer = _get(service, ABUSEIPDB_CHECK, {"Key": service.key, "Accept": "application/json"},
                               {"ipAddress": value, "maxAgeInDays": ABUSEIPDB_DAYS})
@@ -315,18 +366,29 @@ def _wait_for_turn(service: _Service) -> None:
             time.sleep(wait)
 
 
-def _virustotal_facts(answer) -> dict:
+def _virustotal_facts(answer, kind: str) -> dict:
     # Only engines that gave a verdict count, not ones that timed out or can't scan the type
     attributes = answer["data"]["attributes"]
     stats = attributes.get("last_analysis_stats") or {}
     facts = {name: stats.get(name, 0) for name in ("malicious", "suspicious", "undetected", "harmless")}
-    # Seconds since 1970, in UTC
-    checked = attributes.get("last_analysis_date")
-    if checked is None:
-        facts["checked"] = ""
-    else:
-        facts["checked"] = datetime.fromtimestamp(checked, timezone.utc).date().isoformat()
+    facts["checked"] = _date(attributes.get("last_analysis_date"))
+    # A domain's registration date. A file's report has the same field for when it was built.
+    facts["registered"] = _registration_date(attributes) if kind == "domain" else ""
     return facts
+
+
+def _registration_date(attributes: dict) -> str:
+    # Read from whois records, which are often messy, so a date that doesn't read is left out
+    # rather than the whole answer
+    try:
+        return _date(attributes.get("creation_date"))
+    except (TypeError, ValueError, OverflowError, OSError):
+        return ""
+
+
+def _date(seconds) -> str:
+    # Seconds since 1970, in UTC, as a date, or "" when there's none
+    return "" if seconds is None else datetime.fromtimestamp(seconds, timezone.utc).date().isoformat()
 
 
 def _abuseipdb_facts(answer) -> dict:
@@ -362,13 +424,16 @@ def _engines(facts: dict) -> int:
 
 def _describe_virustotal(facts: dict) -> str:
     if not _engines(facts):
-        return "in VirusTotal, but no engine has checked it (unknown, not clean)"
-    text = f"{facts['malicious']} of {_engines(facts)} engines flagged it malicious"
-    if facts["suspicious"]:
-        text += f", {facts['suspicious']} suspicious"
-    # A result is only as new as VirusTotal's last check, and a site can turn malicious after it
-    if facts["checked"]:
-        text += f", last checked {facts['checked']}"
+        text = "in VirusTotal, but no engine has checked it (unknown, not clean)"
+    else:
+        text = f"{facts['malicious']} of {_engines(facts)} engines flagged it malicious"
+        if facts["suspicious"]:
+            text += f", {facts['suspicious']} suspicious"
+        # A result is only as new as VirusTotal's last check, and a site can turn malicious after it
+        if facts["checked"]:
+            text += f", last checked {facts['checked']}"
+    if facts["registered"]:
+        text += f", registered {facts['registered']}"
     return text
 
 

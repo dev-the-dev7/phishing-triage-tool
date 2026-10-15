@@ -65,7 +65,7 @@ def check_display_name(parsed: ParsedEmail) -> Check:
 
 def check_lookalike(parsed: ParsedEmail) -> Check:
     name, strength = "Lookalike domain", Strength.STRONG
-    hits = []
+    hits, flagged = [], []
     targets = [(target, domains, _main_domain(target, domains)) for target, domains in _impersonation_targets()]
     # A word more than one letter longer than every name can't equal one or be a typo of one
     max_length = max(len(form) for t, _, _ in targets for form in _name_forms(t.replace(" ", ""))) + 1
@@ -105,10 +105,11 @@ def check_lookalike(parsed: ParsedEmail) -> Check:
             else:
                 continue
             hits.append(f"{label} {hit}")
+            flagged.append(display_domain)
             reported.append(target_domains)
 
     if hits:
-        return Check(name, Result.FLAG, strength, join_first_five(hits))
+        return Check(name, Result.FLAG, strength, join_first_five(hits), domains=list(dict.fromkeys(flagged)))
     return Check(name, Result.PASS, strength, "No sender or link domain resembles a brand or your own domains")
 
 
@@ -116,10 +117,10 @@ def check_brand_joined(parsed: ParsedEmail) -> Check:
     # paypalsecure.com and mypaypal.com. Weak, not part of the lookalike check, because
     # brands own domains like this too (googleapis.com, paypalobjects.com).
     name, strength = "Brand joined to a word", Strength.WEAK
-    hits = []
+    hits, flagged = [], []
     targets = [(target, domains, {k for k in _name_forms(target.replace(" ", "")) if len(k) >= LONG_NAME_LENGTH})
                for target, domains in _impersonation_targets()]
-    for label, _, base in _unlisted_domains(parsed):
+    for label, display_domain, base in _unlisted_domains(parsed):
         # Split on dashes only. Joining them back would flag paypal-secure.com here as well.
         name_words = {word for form in lookalike_forms(registered_name(base)) for word in form.split("-")}
         reported = []  # one hit per organization
@@ -129,10 +130,11 @@ def check_brand_joined(parsed: ParsedEmail) -> Check:
             # The name on its own (paypal-secure.com) is the lookalike check's job
             if any(keyword in word for keyword in keywords for word in name_words if word not in keywords):
                 hits.append(f"{label} has '{target}' joined to another word but isn't {_main_domain(target, target_domains)}")
+                flagged.append(display_domain)
                 reported.append(target_domains)
 
     if hits:
-        return Check(name, Result.FLAG, strength, join_first_five(hits))
+        return Check(name, Result.FLAG, strength, join_first_five(hits), domains=list(dict.fromkeys(flagged)))
     return Check(name, Result.PASS, strength, "No sender or link domain has a brand joined to another word")
 
 
