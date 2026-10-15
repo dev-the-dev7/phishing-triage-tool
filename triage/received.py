@@ -22,9 +22,8 @@ def find_origin(parsed: ParsedEmail) -> Origin | None:
 
 
 def _handoff_index(hops: list[dict]) -> int | None:
-    # Walk down from the top. The receiving servers so far belong to your provider, so a
-    # hop sent from one of their domains is still internal relaying. The first hop sent
-    # from somewhere else is where the message entered the provider.
+    # From the top down, the receivers so far are your provider's, so a hop from one of their
+    # domains is still internal. The first from anywhere else is the handoff.
     provider = set()
     for i, hop in enumerate(hops):
         provider.add(base_domain(hop["by"]))
@@ -35,9 +34,8 @@ def _handoff_index(hops: list[dict]) -> int | None:
 
 
 def received_warnings(parsed: ParsedEmail) -> list[str]:
-    # A Received header with an IP in a format _read_hop doesn't know gets skipped. If it was
-    # the provider's handoff, the origin is wrong, and the analyst is told to check it.
-    # Headers with no IP at all are normal (Gmail's API submissions) and aren't reported.
+    # A header with an IP the tool can't read is skipped, and if it was the handoff, the origin
+    # is wrong. Headers with no IP are normal (Gmail's API) and aren't reported.
     warnings = []
     for position, header in enumerate(parsed.received, 1):
         parts = _split_received(header)
@@ -71,10 +69,9 @@ def _read_hop(header: str) -> dict | None:
     if not parts:
         return None
     from_part, by = parts
-    # Gmail/Postfix write "helo (rdns [ip])". The helo is the sender's claim and can be
-    # an IP itself ("[8.8.8.8] (unknown [203.0.113.5])"), so the IP is taken from the
-    # receiver's part in parentheses. The last match is used because the receiver
-    # writes its part after the helo. qmail's "(HELO [8.8.8.8])" is also the helo and is skipped.
+    # Gmail and Postfix write "helo (rdns [ip])". The helo is the sender's claim and can be an
+    # IP itself, so the IP comes from the receiver's part, the last one. qmail's "(HELO [ip])"
+    # is a helo too.
     receiver_part = re.findall(r"\((?!helo\s)([\w.-]*?)\.?\s*\[(?:IPv6:)?([0-9a-fA-F:.]+)\]", from_part, re.I)
     # Microsoft and qmail write "name (ip)"
     plain_ips = re.findall(r"\((?:IPv6:)?([0-9a-fA-F:.]+)\)", from_part)
@@ -82,8 +79,7 @@ def _read_hop(header: str) -> dict | None:
     # other formats a leading [ip] is the sender's helo.
     leading_ip = re.match(r"\[(?:IPv6:)?([0-9a-fA-F:.]+)\]", from_part)
     if receiver_part:
-        # Use the name the receiver looked up, never the sender's claim.
-        # "unknown" means the lookup failed, and the claimed name could be anything.
+        # The name the receiver looked up, never the sender's claim. "unknown" means it failed.
         rdns, ip_text = receiver_part[-1]
         if not rdns and "helo=" in from_part:
             # Exim writes "rdns ([ip]:port helo=...)", with its verified name first

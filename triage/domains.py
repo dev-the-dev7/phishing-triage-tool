@@ -9,27 +9,23 @@ from urllib.parse import unquote, urlsplit
 
 from .lists import SHARED_HOSTING
 
-# Private, carrier-grade NAT, loopback and link-local ranges: hops from these are the mail
-# system's own servers. Not Python's is_private, which misses carrier-grade NAT and includes
-# reserved ranges like 240.0.0.0/4. A hop from one of those was made up and should stay visible.
+# The mail system's own servers. Not Python's is_private, which misses carrier-grade NAT and
+# includes reserved ranges. A hop from one of those was made up and should stay visible.
 INTERNAL_NETWORKS = [ipaddress.ip_network(n) for n in (
     "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10",
     "127.0.0.0/8", "169.254.0.0/16", "::1/128", "fc00::/7", "fe80::/10",
 )]
 
 
-# The Public Suffix List (publicsuffix.org): the endings people register names under, like
-# com, co.uk, and github.io, so two names under one have different owners. Browsers use it
-# to keep one site's cookies from another's. A copy ships with the tool, so it works
-# offline, and it only changes when you run update_suffixes.py. Rules are one ending per
-# line, *.ck means every name under ck is an ending, and !www.ck makes an exception to that.
+# The Public Suffix List (publicsuffix.org): endings like com, co.uk and github.io, where
+# names under one have different owners. The copy only changes with update_suffixes.py.
 PUBLIC_SUFFIX_FILE = Path(__file__).with_name("public_suffix_list.dat")
 
 
 def _read_suffixes(text: str) -> tuple[set[str], set[str], set[str]]:
     rules, wildcards, exceptions = set(), set(), set()
     for line in text.splitlines():
-        # A rule is the first word on its line
+        # The first word on a line. *.ck covers every name under ck, and !www.ck is an exception.
         words = line.split()
         if not words or words[0].startswith("//"):
             continue
@@ -52,33 +48,29 @@ def list_date(text: str) -> date | None:
 _suffix_list = PUBLIC_SUFFIX_FILE.read_text(encoding="utf-8")
 SUFFIXES, WILDCARDS, EXCEPTIONS = _read_suffixes(_suffix_list)
 SUFFIX_LIST_DATE = list_date(_suffix_list)
-# Hosting services the list doesn't have yet (see lists.py)
+# Hosting services the list doesn't have yet
 SUFFIXES |= SHARED_HOSTING
-# Every TLD, and the most labels a rule can match. Only that many labels at the end of a
-# host are compared, so one with thousands of labels is still quick.
+# Every TLD, and the most labels a rule can match, so a host with thousands is still quick
 TLDS = {rule.rpartition(".")[2] for rule in SUFFIXES | WILDCARDS | EXCEPTIONS}
 MAX_RULE_LABELS = max(rule.count(".") + 2 for rule in SUFFIXES | WILDCARDS | EXCEPTIONS)
 
 
 def base_domain(domain: str) -> str:
-    # The registrable domain: the public suffix and one label in front of it, which is what
-    # one owner controls. mail.paypal.com gives paypal.com, a.b.co.uk gives b.co.uk, and
-    # www.paypal-login.github.io gives paypal-login.github.io. A suffix on its own (co.uk)
-    # is returned whole.
+    # The part one owner controls: mail.paypal.com gives paypal.com, and
+    # www.paypal-login.github.io gives paypal-login.github.io
     domain = domain.lower().strip(".")
     if is_ip(domain):
         return domain
     labels = domain.split(".")
     # The list writes non-English endings in Unicode, so xn-- labels are compared decoded.
-    # Each one decodes to one label, so the count stays the same.
+    # Each still decodes to one label, so the count matches.
     names = decode_idn(domain).split(".")
     return ".".join(labels[-(_suffix_length(names) + 1):])
 
 
 def _suffix_length(labels: list[str]) -> int:
-    # How many labels at the end are the public suffix. An exception wins over every other
-    # rule and is registrable itself, so !www.ck makes the suffix ck. Otherwise the rule with
-    # the most labels wins, and with none, the suffix is the last label.
+    # How many labels at the end are the suffix. An exception wins and is registrable itself,
+    # then the longest rule, and with none, the last label.
     longest_first = range(min(len(labels), MAX_RULE_LABELS), 0, -1)
     for count in longest_first:
         if ".".join(labels[-count:]) in EXCEPTIONS:
@@ -90,8 +82,7 @@ def _suffix_length(labels: list[str]) -> int:
 
 
 def registered_name(base: str) -> str:
-    # The name the owner registered, from a base domain: chose.com gives chose.
-    # Pass it base_domain()'s result, since mail.chose.com would give mail.
+    # Takes base_domain()'s result: chose.com gives chose, but mail.chose.com would give mail
     return base.split(".")[0]
 
 
@@ -101,16 +92,13 @@ TAB_OR_NEWLINE = str.maketrans("", "", "\t\n\r")
 
 
 def browser_url(url: str) -> str:
-    # The link rewritten so Python's urlsplit finds the host a browser goes to. Python follows
-    # the URL RFC, and browsers differ from it in ways phishers use. All of these go to evil.com:
-    #   http://evil.com\@paypal.com      \ counts as /, so @paypal.com is part of the path
-    #   http:\\evil.com, http:/evil.com  any slashes after http: work
-    #   \\evil.com, /\evil.com           with no scheme, two slashes of either kind take the
-    #                                    webmail page's https, like //evil.com does
-    #   http://x[@evil.com               the login part, up to the last @, is skipped. Python's
-    #                                    parser refuses a [ or ] in it and finds no host at all.
-    #   h<tab>ttp://evil.com             tabs and line breaks are dropped, and so are control
-    #                                    characters and spaces at either end
+    # Rewritten so urlsplit finds the host a browser goes to. Browsers bend the URL rules in
+    # ways phishers use, and all of these go to evil.com:
+    #   http://evil.com\@paypal.com      \ counts as /
+    #   http:\\evil.com, http:/evil.com  any slashes work
+    #   \\evil.com, /\evil.com           takes the page's https, like //evil.com
+    #   http://x[@evil.com               the login part is skipped (Python refuses the [)
+    #   h<tab>ttp://evil.com             tabs and line breaks are dropped
     url = url.strip(C0_OR_SPACE).translate(TAB_OR_NEWLINE)
     if re.match(r"[/\\]{2}", url):
         url = "https:" + url
@@ -123,9 +111,8 @@ def browser_url(url: str) -> str:
 
 
 def url_host(url: str) -> str | None:
-    # The host a link goes to, read the way a browser reads it (see browser_url). The host is
-    # percent-decoded (http://%65vil.com), and fullwidth letters and other dots are read as plain
-    # ones (http://ｅｖｉｌ。com). A trailing dot is dropped, since evil.com. is the same site in DNS.
+    # Read the way a browser reads it: percent-decoded, with fullwidth letters and other dots
+    # made plain (http://ｅｖｉｌ。com), and no trailing dot
     try:
         name = urlsplit(browser_url(url)).hostname
     except ValueError:
@@ -137,11 +124,9 @@ def url_host(url: str) -> str | None:
 
 
 def browser_ipv4(host: str) -> str | None:
-    # Browsers read a host that ends in a number as an IPv4 address, in forms Python's ipaddress
-    # refuses. These all go to 216.58.214.4: http://3627734532/, http://0xd83ad604/,
-    # http://0330.072.0326.04/, http://216.58.54788/. Each part can be decimal, hex (0x) or
-    # octal (a leading 0), and the last part fills the bytes that are left (WHATWG URL standard).
-    # None when the host isn't one, or the browser would refuse it.
+    # Browsers read a host ending in a number as IPv4, in forms ipaddress refuses:
+    # http://3627734532/, http://0xd83ad604/ and http://0330.072.0326.04/ all go to
+    # 216.58.214.4. The last part fills the bytes left (WHATWG URL standard).
     parts = host.split(".")
     if not re.fullmatch(r"[0-9]+|0x[0-9a-f]*", parts[-1], re.I) or len(parts) > 4:
         return None
@@ -162,17 +147,15 @@ def browser_ipv4(host: str) -> str | None:
 
 
 def ascii_domain(domain: str) -> str:
-    # The xn-- form that DNS, proxy logs and blocklists use: pаypal.com with a Cyrillic а is
-    # xn--pypal-4ve.com. A domain the encoder refuses (an empty or overlong label) is kept as is.
+    # The xn-- form DNS, proxy logs and blocklists use. One the encoder refuses is kept as is.
     try:
         return domain.encode("idna").decode("ascii")
     except UnicodeError:
         return domain
 
 
-# A URL written out in text, which mail clients make clickable. It runs to the next space,
-# quote or backtick (Markdown's `code`), and punctuation at the end is taken as the sentence's,
-# along with Markdown's *bold*.
+# A URL written in text, which mail clients make clickable. Punctuation at the end belongs to
+# the sentence.
 TEXT_URL = re.compile(r"(?<![\w.])(?:https?://|www\.)[^\s<>\"'`]+", re.I)
 
 
@@ -181,12 +164,9 @@ def urls_in_text(text: str) -> list[str]:
 
 
 def domains_in_text(text: str) -> list[str]:
-    # Domains written in text, normalized like a link's host. Any letters count ([^\W\d_]), not
-    # just a-z, so fullwidth or Cyrillic text that looks like paypal.com is still found. The
-    # ending has to be a real TLD, or look like one to the reader (com with a Cyrillic с, or
-    # corn for com), so file names (invoice.pdf) and words joined by a dot (Thanks.Regards)
-    # aren't domains. .zip and .mov are real TLDs, so invoice.zip is one. A non-English TLD
-    # can be in its xn-- form, the way DNS and proxy logs write it (xn--p1ai is .рф).
+    # Any letters count, so Cyrillic text that looks like paypal.com is found. The ending has
+    # to be a real TLD, or look like one (corn for com), so invoice.pdf and Thanks.Regards
+    # aren't domains.
     found = re.finditer(r"(?<![\w.-])(?:[\w-]+\.)+([^\W\d_]{2,}|xn--[a-z0-9-]+)(?![\w-])", normalize_unicode(text))
     return [m.group(0) for m in found if _passes_for_tld(decode_idn(m.group(1)))]
 
@@ -196,18 +176,15 @@ def _passes_for_tld(label: str) -> bool:
 
 
 def normalize_unicode(text: str) -> str:
-    # Invisible formatting characters (zero-width space, soft hyphen) are dropped. Readers
-    # don't see them, browsers drop them from a link's host, and phishers hide them inside
-    # names and links to get past filters (Z-WASP used this against Office 365).
+    # Invisible formatting characters (zero-width space, soft hyphen) are dropped, as browsers
+    # do in a host. Phishers hide them in names to get past filters.
     text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
-    # Fullwidth and styled letters become plain ones (ｐ, 𝐩 to p), and IDNA's other dots (。．｡)
-    # become ".", as browsers do to a link's host: ｐａｙｐａ１。com goes to paypa1.com.
+    # Fullwidth and styled letters become plain, and IDNA's other dots become "."
     return unicodedata.normalize("NFKC", text).replace("\u3002", ".").lower()
 
 
 def decode_idn(domain: str) -> str:
-    # xn--pypal-4ve.com -> pаypal.com (with a Cyrillic а), to compare with paypal.com.
-    # Labels are decoded one at a time, and a broken one is kept as written and still checked.
+    # xn--pypal-4ve.com -> pаypal.com, to compare with paypal.com. A broken label is kept as is.
     labels = []
     for label in domain.split("."):
         if label.startswith("xn--"):
@@ -219,10 +196,8 @@ def decode_idn(domain: str) -> str:
     return ".".join(labels)
 
 
-# Characters that pass for Latin letters: the digit swaps, plus every lowercase Cyrillic and
-# Greek letter that Unicode's confusables list says looks like one. Text is lowercased first,
-# which covers a capital whose lowercase form is listed. Written as escapes because they
-# look identical on screen.
+# Characters that pass for Latin letters: digit swaps, and the lowercase Cyrillic and Greek
+# letters Unicode's confusables list maps to one. Escapes, since they look identical on screen.
 LOOKALIKE_CHARS = str.maketrans({
     "0": "o", "1": "l", "3": "e", "5": "s",
     # Cyrillic а г е о р с у х ш ѕ і ј ѡ ѵ ү һ ҽ ӏ ԁ ԛ ԝ
@@ -235,21 +210,19 @@ LOOKALIKE_CHARS = str.maketrans({
     "\u03c3": "o", "\u03c5": "u", "\u03ed": "o", "\u03f3": "j", "\u03f8": "p",
 })
 
-# Capitals that look like a lowercase letter in most fonts: Latin I, Cyrillic І and Greek Ι
-# look like l, and Cyrillic Ь looks like b. Not in LOOKALIKE_CHARS, which runs after
-# lowercasing, and only used as a second reading (see lookalike_forms).
+# Capitals that look like a lowercase letter: I, Cyrillic І and Greek Ι look like l, and Ь
+# like b. Kept apart, since LOOKALIKE_CHARS runs after lowercasing.
 CAPITAL_LOOKALIKES = str.maketrans({"I": "l", "\u0406": "l", "\u0399": "l", "\u042c": "b"})
 
 
-# Letter pairs that pass for one letter. These can't go in LOOKALIKE_CHARS, because
-# str.maketrans only takes single characters as keys.
+# Letter pairs that pass for one letter, kept out of LOOKALIKE_CHARS since str.maketrans
+# only takes single characters
 LOOKALIKE_PAIRS = {"rn": "m", "nn": "m", "vv": "w", "cl": "d"}
 
 
 def unmask_lookalikes(text: str, pairs: bool = True) -> str:
-    # paypa1.com -> paypal.com, rnicrosoft.com -> microsoft.com, clocusign.com -> docusign.com
-    # Characters are swapped before pairs, which catches a pair made with a swapped
-    # character: c1ocusign.com -> clocusign.com -> docusign.com
+    # paypa1.com -> paypal.com, rnicrosoft.com -> microsoft.com. Characters go before pairs, so
+    # c1ocusign.com still becomes docusign.com.
     text = normalize_unicode(text).translate(LOOKALIKE_CHARS)
     if pairs:
         for pair, letter in LOOKALIKE_PAIRS.items():
@@ -258,14 +231,9 @@ def unmask_lookalikes(text: str, pairs: bool = True) -> str:
 
 
 def lookalike_forms(text: str) -> set[str]:
-    # Every way to read the text with its lookalikes swapped back. The checks count a match
-    # when any form of the text matches any form of the name, so one reading can't hide another.
-    #   With and without the letter pairs. Swapping a pair can break a match: amazonnow.com
-    #   contains amazon, but nn makes it amazomow. linnedin is a typo of linkedin, but nn
-    #   makes it limedin.
-    #   With capitals as written and as the lowercase letter they look like, so "PayPaI"
-    #   with a capital I passes for PayPal. Not only that way, because "IAN WRIGHT" would
-    #   become "lan wrlght". Domains are lowercase, so this only matters for display names.
+    # Every reading with lookalikes swapped back, since one can hide another: with and without
+    # pairs (nn turns amazonnow into amazomow), and with capitals as written and as the letter
+    # they look like (PayPaI with a capital I, but IAN WRIGHT isn't lan wrlght).
     forms = set()
     for shown in (text, unicodedata.normalize("NFKC", text).translate(CAPITAL_LOOKALIKES)):
         forms.add(unmask_lookalikes(shown, pairs=False))

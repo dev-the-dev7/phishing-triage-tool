@@ -7,10 +7,9 @@ MICROSOFT_DOMAINS = ["microsoft.com", "office.com", "office365.com", "microsoft3
 META_DOMAINS = ["facebook.com", "facebookmail.com", "fb.com", "fbcdn.net", "meta.com",
                 "instagram.com", "whatsapp.com", "messenger.com"]
 
-# Brands commonly impersonated in work email and the domains they actually use, including
-# the image and tracking domains their real mail links to. The first one is the main domain.
-# Names sharing one list are one company, reported once.
-# Kept short on purpose: it's a starting point, not a complete list.
+# Brands often impersonated at work, and the domains their real mail uses, images and tracking
+# included. The first is the main domain, and names sharing a list are one company. A starting
+# point, not a complete list.
 BRANDS: dict[str, list[str]] = {
     "paypal": ["paypal.com", "paypalobjects.com"],
     "microsoft": MICROSOFT_DOMAINS,
@@ -35,29 +34,25 @@ BRANDS: dict[str, list[str]] = {
     "meta": META_DOMAINS,
 }
 
-# Your organization: the names people call it and every domain you own. Any of these
-# domains is legitimate for any of these names. Lookalikes of them get flagged, and so
-# does a display name using a name from outside these domains ("Contoso IT Support").
-# Use the names attackers would write, not common words that show up everywhere.
-# The names only work once OWN_DOMAINS is filled in, since there's nothing to compare to.
+# Your organization's names and every domain you own. Lookalikes get flagged, and so does a
+# display name using one of the names from another domain. Use names attackers would write,
+# not common words. The names need OWN_DOMAINS filled in.
 OWN_NAMES: set[str] = set()   # e.g. {"contoso", "contoso health"}
 # A list, not a set, because the first one is your main domain and is named in the evidence
 OWN_DOMAINS: list[str] = []   # e.g. ["contoso.com", "contoso-health.org"]
 
-# The server name your provider writes at the start of its Authentication-Results header,
-# like "mx.google.com" for Gmail. Empty means the topmost header is trusted, which is right
-# when your provider always adds one, since it goes on top of anything the sender wrote.
-# Fill this in if it might not: then only headers from these servers count.
+# The server name your provider writes at the start of Authentication-Results. Empty trusts
+# the topmost header, which is right when your provider always adds one. If it might not,
+# fill this in, and only headers from these servers count.
 TRUSTED_AUTHSERV_IDS: set[str] = set()   # e.g. {"mx.google.com"}
 
 # Names attackers are likely to impersonate (CEO, CFO, anyone who approves payments).
 # Mail using one of these names from outside OWN_DOMAINS gets flagged.
 EXECUTIVES: set[str] = set()
 
-# Hosting services where every customer gets their own subdomain, so
-# paypal-login.github.io and my-blog.github.io belong to different people.
-# Phishers use these because they're free and come with valid HTTPS. The Public Suffix
-# List has most of them too. These are all added to it, which covers the few it doesn't.
+# Hosting where every customer gets a subdomain, so paypal-login.github.io and
+# my-blog.github.io have different owners. Phishers use these since most are free and come
+# with HTTPS. Added to the Public Suffix List for the few it lacks.
 SHARED_HOSTING: set[str] = {
     "github.io", "web.app", "firebaseapp.com", "pages.dev", "workers.dev",
     "netlify.app", "vercel.app", "herokuapp.com", "azurewebsites.net", "amazonaws.com",

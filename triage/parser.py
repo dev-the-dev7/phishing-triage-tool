@@ -13,16 +13,14 @@ from .models import Address, Attachment, Link, ParsedEmail
 # email library needs several times the file's size in memory.
 MAX_EMAIL_BYTES = 150 * 1024 * 1024
 
-# Real headers are well under this, even with a long non-English file name. Python's email
-# library gets very slow on longer ones (a 160 KB Content-Type took 90 seconds): its parser
-# is quadratic in places, and it parses a header again every time it's read.
+# Real headers are well under this. Python's email library is quadratic on longer ones (a
+# 160 KB Content-Type took 90 seconds).
 MAX_HEADER_LENGTH = 4 * 1024
 
 
 class _HeaderLengthPolicy(email.policy.EmailPolicy):
-    # The default policy, but the library won't parse a header over MAX_HEADER_LENGTH.
-    # Cutting a Content-Type short could change how the email splits into parts and hide one,
-    # so the email is refused. A long Date only gets a warning (_header catches it).
+    # Refuses a header over MAX_HEADER_LENGTH, since cutting a Content-Type short could hide a
+    # part. A long Date only gets a warning.
     def header_fetch_parse(self, name, value):
         if len(value) > MAX_HEADER_LENGTH:
             raise ValueError(f"the {name} header is {len(value):,} characters long, too long to be "
@@ -31,8 +29,7 @@ class _HeaderLengthPolicy(email.policy.EmailPolicy):
 
 
 def parse_file(path) -> ParsedEmail:
-    # Binary mode so the email library handles charsets instead of the tool guessing.
-    # One byte past the limit is enough to know it's too big, without reading all of it.
+    # Binary, so the email library handles charsets. One byte past the limit shows it's too big.
     with open(path, "rb") as f:
         raw = f.read(MAX_EMAIL_BYTES + 1)
     if len(raw) > MAX_EMAIL_BYTES:
@@ -65,13 +62,11 @@ def _parse_message(raw: bytes) -> ParsedEmail:
     from_list = _addresses(msg, "From", warnings)
     if len(from_list) > 1:
         warnings.append(f"From has {len(from_list)} addresses, using the first")
-    # Email allows one Reply-To header (RFC 5322). With more, it isn't defined which one a
-    # mail client replies to. The addresses in all of them are checked.
+    # Only one Reply-To is allowed, and with more, which one a client uses isn't defined
     reply_to_count = _count_headers(msg, "Reply-To")
     if reply_to_count > 1:
         warnings.append(f"{reply_to_count} Reply-To headers found, checking the addresses in all of them")
-    # Reported phish often arrive forwarded as an attachment. The checks only read this
-    # email's own headers and body, so they'd be checking the employee's forward.
+    # Reported phish often arrive as an attachment, and the checks would read the forward
     for name in _attached_emails(msg):
         warnings.append(f"{name} is an email attached to this one. If this is a forwarded report, "
                         "the checks ran on the wrapper. Save the attachment and run the tool on it.")
@@ -88,8 +83,7 @@ def _parse_message(raw: bytes) -> ParsedEmail:
         to=_addresses(msg, "To", warnings),
         subject=_text_header(msg, "Subject", warnings),
         date=_header(msg, "Date", warnings),
-        # Read as written, since a search of the mail logs needs it exactly. The library would
-        # decode =?utf-8?q?<x=40evil.com>?= into <x@evil.com>.
+        # As written, since a search of the mail logs needs it exactly
         message_id=next(iter(_raw_headers(msg, "Message-ID")), ""),
         received=_raw_headers(msg, "Received"),
         auth_results=_raw_headers(msg, "Authentication-Results"),
@@ -123,35 +117,31 @@ def _header(msg, name, warnings) -> str:
 
 
 def _text_header(msg, name, warnings) -> str:
-    # A plain text header like the Subject. It's decoded here, not by the library, because the
-    # library would refuse a very long one and _decode_words decodes its start instead.
+    # Decoded here, since the library would refuse a very long one, and _decode_words decodes
+    # its start instead
     raw = _raw_headers(msg, name)[:1]
     return _collapse_whitespace(_decode_words(raw[0], name, warnings)) if raw else ""
 
 
 def _raw_headers(msg, name) -> list[str]:
-    # The header read as written. The email library decodes =?utf-8?q?...?= encoded
-    # words anywhere in a header, but they're only allowed in plain text like the Subject and
-    # display names. Anywhere else, decoding turns text the sender chose into something new:
-    # the valid envelope address =?utf-8?q?x=3Bdkim=3Dpass?=@evil.com, copied into
-    # Authentication-Results by the provider, would be decoded into x;dkim=pass@evil.com.
+    # As written. The library decodes =?utf-8?q?...?= anywhere, but it's only allowed in text
+    # like the Subject. Elsewhere it lets the sender write new text: =?utf-8?q?x=3Bdkim=3Dpass?=
+    # in an address copied into Authentication-Results would become x;dkim=pass.
     values = []
     for key, value in msg.raw_items():
         if key.lower() == name.lower():
-            # The library keeps bytes that aren't ASCII as placeholder characters (surrogates).
-            # They're decoded as UTF-8 here, like the rest of the email.
+            # The library keeps bytes that aren't ASCII as surrogates, decoded here as UTF-8
             text = str(value).encode("utf-8", "surrogateescape").decode("utf-8", errors="replace")
             values.append(_collapse_whitespace(text))
     return values
 
 
 def _addresses(msg, name, warnings, every_header=False) -> list[Address]:
-    # Read from the header as written, since the email library decodes encoded words even
-    # inside an address: service@=?utf-8?q?paypal=2Ecom?= would come out as service@paypal.com.
+    # As written, since the library decodes encoded words even inside an address
     raw = _raw_headers(msg, name) if every_header else _raw_headers(msg, name)[:1]
     try:
-        # getaddresses' strict mode drops what it can't read instead of guessing, sometimes just
-        # one address out of several (x@[1.2.3.4]). The lenient parser runs only to notice that.
+        # Strict mode drops what it can't read, sometimes one address of several. The lenient
+        # parse only notices that.
         pairs = getaddresses(raw)
         lenient = getaddresses(raw, strict=False)
     except Exception as e:
@@ -181,9 +171,8 @@ def _count_headers(msg, name) -> int:
 
 
 def _decode_words(text: str, name: str, warnings) -> str:
-    # Decodes =?utf-8?q?...?= encoded words, the way the email library does in a plain text header.
     # Only the start is decoded, since the decoder is slow on long text. That's the part a mail
-    # client shows, and padding a display name can't push a brand name out of it.
+    # client shows, so padding a display name can't push a brand name out of it.
     start, rest = text[:MAX_HEADER_LENGTH], text[MAX_HEADER_LENGTH:]
     if rest:
         warning = f"{name} has text over {MAX_HEADER_LENGTH:,} characters long, only the start was decoded"
@@ -197,9 +186,8 @@ def _collapse_whitespace(value: str) -> str:
 
 
 def _shown_texts(msg, subtype, warnings) -> list[str]:
-    # Every text/plain or text/html part a mail client could show. In multipart/alternative,
-    # clients show the last version they can, and some show every inline part. A phishing
-    # link can be in the second HTML part, not the first.
+    # Every part a mail client could show. Some show every inline part, so a phishing link can
+    # be in the second HTML part.
     texts = []
     for part in _own_parts(msg):
         if part.get_content_type() != f"text/{subtype}" or part.is_attachment():
@@ -213,8 +201,8 @@ def _shown_texts(msg, subtype, warnings) -> list[str]:
 
 
 def _own_parts(msg) -> list:
-    # Every part of this email in order, without going inside attached emails, which are
-    # a separate message. A stack, not recursion, because deep nesting would overflow it.
+    # This email's parts in order, not those of attached emails. A stack, since deep nesting
+    # would overflow recursion.
     parts, stack = [], [msg]
     while stack:
         part = stack.pop()
@@ -225,15 +213,12 @@ def _own_parts(msg) -> list:
 
 
 def _text_links(text: str) -> list[Link]:
-    # URLs written out in a plain text part. Mail clients make them clickable, and open a www.
-    # link with no scheme as http.
+    # Mail clients make these clickable, and open a www. link with no scheme as http
     return [Link("http://" + url if url.lower().startswith("www.") else url, url) for url in urls_in_text(text)]
 
 
 def _attached_emails(msg) -> list[str]:
-    # message/rfc822 is an attached email, and message/global is the same with UTF-8 headers.
-    # Outlook's .msg is its own format, found by name. Only this email's own parts are
-    # searched: an email inside an attached one gets checked when that one is run on its own.
+    # message/global is message/rfc822 with UTF-8 headers, and Outlook's .msg is found by name
     names = []
     for part in _own_parts(msg):
         filename = part.get_filename() or ""
@@ -245,8 +230,7 @@ def _attached_emails(msg) -> list[str]:
 
 def _attachments(msg) -> list[Attachment]:
     found = []
-    # walk() instead of iter_attachments(), to find files nested inside other multipart
-    # sections (like a forwarded email).
+    # walk(), not iter_attachments(), to find files nested in other parts, like a forwarded email
     for part in msg.walk():
         if part.is_multipart() or not (part.is_attachment() or part.get_filename()):
             continue

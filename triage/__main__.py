@@ -55,15 +55,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _print_escaped(text: str) -> None:
-    # Email text can hold terminal control codes (ESC sequences that move the cursor and
-    # overwrite earlier lines) and invisible formatting characters (a right-to-left override
-    # shows invoice<RLO>fdp.exe as invoiceexe.pdf). They're printed as visible codes instead.
+    # Terminal escape codes and invisible characters are printed as visible codes, since a
+    # right-to-left override shows invoice<RLO>fdp.exe as invoiceexe.pdf
     shown = (ascii(ch)[1:-1] if unicodedata.category(ch) in ("Cc", "Cf") else ch for ch in text)
     print("".join(shown))
 
 
 def _read_text(name: str) -> str:
-    # One byte past the limit is enough to know it's too big, without reading all of it
+    # One byte past the limit shows it's too big
     if name == "-":
         data = sys.stdin.buffer.read(MAX_TEXT_BYTES + 1)
     else:

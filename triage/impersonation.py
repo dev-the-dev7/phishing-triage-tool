@@ -7,15 +7,13 @@ from .domains import (base_domain, decode_idn, is_ip, lookalike_forms, normalize
 from .lists import BRANDS, EXECUTIVES, FREE_EMAIL_DOMAINS, OWN_DOMAINS, OWN_NAMES
 from .models import Check, ParsedEmail, Result, Strength, join_first_five
 
-# Brand names this long or longer get the full checks. Shorter ones are one letter from
-# common words (apple/apply, chase/phase) and sit inside others (pineapple, purchase), so
-# they're typo-checked on the registered name only (chose.com) and skip the joined check.
-# Subdomains are free, so a phisher would just write the real name there, not a typo.
+# Shorter brand names are one letter from common words (apple/apply) and sit inside others
+# (pineapple), so they skip the joined check and are only typo-checked on the registered
+# name. A subdomain is free, so a phisher would write the real name there, not a typo.
 LONG_NAME_LENGTH = 6
 
-# Names shorter than this aren't checked for typos at all. Nearly every word this short is
-# one letter from another (meta: beta, mega, metal), so the flags would mostly be wrong.
-# They're still caught spelled right or with lookalike characters: meta-support.com, m3ta.com.
+# Shorter names aren't typo-checked, since nearly every short word is one letter from another
+# (meta: beta, mega). They're still caught spelled right or with lookalikes (m3ta.com).
 MIN_TYPO_LENGTH = 5
 
 
@@ -71,8 +69,8 @@ def check_lookalike(parsed: ParsedEmail) -> Check:
     # A word more than one letter longer than every name can't equal one or be a typo of one
     max_length = max(len(form) for t, _ in targets for form in lookalike_forms(t.replace(" ", ""))) + 1
     for label, display_domain, base in _unlisted_domains(parsed):
-        # The TLD comes from a fixed list and can't hold a lookalike. Removing it also stops
-        # brand-owned TLDs from matching their own name, like applecard.apple.
+        # The TLD can't hold a lookalike, and without it a brand's own TLD (applecard.apple)
+        # doesn't match its name
         suffix = base.partition(".")[2]
         name_part = display_domain.removesuffix("." + suffix)
         forms = lookalike_forms(name_part)
@@ -89,11 +87,10 @@ def check_lookalike(parsed: ParsedEmail) -> Check:
         for target, target_domains in targets:
             if target_domains in reported:
                 continue
-            # Spaces are removed first, as in a domain, so a letter pair across words counts:
-            # "ken nelson" gives kemelson, like kennelson.com.
+            # Without spaces, as in a domain, so "ken nelson" gives kemelson like kennelson.com
             keywords = lookalike_forms(target.replace(" ", ""))
-            # A real domain in front of someone else's. Checked first because it's the clearest
-            # evidence, and it catches real domains that aren't the name (microsoftonline.com).
+            # A real domain in front of someone else's is the clearest evidence, and catches
+            # real domains that aren't the name (microsoftonline.com)
             real_domain = next((d for d in target_domains if re.search(_whole_name_pattern(d), subdomains)), None)
             main_domain = _main_domain(target, target_domains)
             if real_domain:
@@ -141,14 +138,12 @@ def check_brand_joined(parsed: ParsedEmail) -> Check:
 def _impersonation_targets() -> list[tuple[str, list[str]]]:
     if not OWN_DOMAINS:
         return list(BRANDS.items())
-    # Base domains, so listing mail.contoso.com still matches contoso.com. dict.fromkeys
-    # drops the repeats that creates and keeps the order, so the main domain stays first.
+    # Base domains, so mail.contoso.com still matches contoso.com. Repeats are dropped in
+    # order, so the main one stays first.
     own_domains = list(dict.fromkeys(base_domain(d) for d in OWN_DOMAINS))
-    # Each domain's registered name counts as well: if you own contosocorp.com,
-    # contosocorp.net is a lookalike even when your only name is "contoso".
+    # Owning contosocorp.com makes contosocorp.net a lookalike, even if your name is "contoso"
     names = sorted(n.lower() for n in OWN_NAMES) + [registered_name(d) for d in own_domains]
-    # Repeated names are dropped (contoso.com and contoso.org both give "contoso"). Every
-    # name gets the same domain list, so the checks treat them as one organization.
+    # Every name gets the same domain list, so the checks treat them as one organization
     return list(BRANDS.items()) + [(name, own_domains) for name in dict.fromkeys(names)]
 
 
@@ -160,10 +155,8 @@ def _main_domain(target: str, target_domains: list[str]) -> str:
 
 
 def _unlisted_domains(parsed: ParsedEmail) -> list[tuple[str, str, str]]:
-    # Sender and link domains that don't belong to an impersonation target and aren't
-    # free webmail, as (label for the evidence, domain as displayed, base domain).
-    # Links matter because phishing sent from a hacked but real account has a normal
-    # sender, and the lookalike is in the link.
+    # Sender and link domains that aren't a target's or free webmail, as (label, domain as
+    # displayed, base domain). Links matter, since mail from a hacked account has a normal sender.
     found_in = {}
     for a in [parsed.from_addr, *parsed.reply_to]:
         if a and a.domain:
@@ -207,11 +200,9 @@ def _typo_or_equal(keyword: str, words: set[str], name_words: set[str]) -> bool:
 
 
 def _domain_words(domain: str, max_length: int) -> list[str]:
-    # Each part between dots, split on dashes, plus every run of neighboring pieces joined,
-    # so a multi-word name is compared whole wherever it sits: wells-farqo-login gives
-    # wells, farqo, login, wellsfarqo, farqologin, wellsfarqologin
-    # Runs longer than max_length are skipped, since they can't match a name. Without the
-    # limit, a link with thousands of dashes in its host would take minutes to check.
+    # In each part between dots, every run of dash-separated pieces, joined: wells-farqo-login
+    # gives wells, farqo, login, wellsfarqo, farqologin and wellsfarqologin. Runs past
+    # max_length can't match a name, and skipping them keeps thousands of dashes quick.
     words = []
     for part in domain.split("."):
         # Empty pieces (from "--") are dropped so every piece makes the run longer

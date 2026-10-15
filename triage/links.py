@@ -6,13 +6,12 @@ import re
 from .domains import TAB_OR_NEWLINE, TEXT_URL, base_domain, decode_idn, domains_in_text, url_host
 from .models import Check, ParsedEmail, Result, Strength, join_first_five
 
-# Links that open a web page, an empty one (about:blank), an email, a call or a text message,
-# or an image attached to the email (cid:). Apple Mail adds x-apple-data-detectors: links
-# around dates and addresses it spots. Anything else hands the link to a script, a file, or
-# another program.
+# Links that open a web page, an empty one (about:blank), an email, a call, a text or an
+# attached image (cid:), and the ones Apple Mail adds around dates and addresses. Anything
+# else goes to a script, a file or a program.
 WEB_OR_MAIL = {"http", "https", "about", "mailto", "tel", "sms", "cid", "x-apple-data-detectors"}
-# What the ones phishing uses most do. Others, like search-ms: and ms-appinstaller:, open a
-# Windows program, and phishing has used both to run malware.
+# The ones phishing uses most. Others, like search-ms: and ms-appinstaller:, open a program,
+# and phishing has used both to run malware.
 LINK_TYPES = {
     "javascript": "runs a script",
     "vbscript": "runs a script",
@@ -30,21 +29,18 @@ def check_link_mismatch(parsed: ParsedEmail) -> Check:
         if not href_host:
             continue
         split += [f"{domain} in a link to {href_host}" for domain in link.split_domains]
-        # What the reader sees, then every bit of text in the link, hidden parts too. The tool
-        # can't always tell what a browser hides, and reading both means a mistake either way
-        # can't hide a domain.
+        # What the reader sees, then all of it, hidden parts too, so a wrong guess about what's
+        # hidden can't hide a domain
         for text in dict.fromkeys([link.text, link.full_text]):
             shown_domain = _shown_domain(text)
-            # Both sides decoded: text showing a Unicode domain that goes to the same domain's
-            # xn-- form is a match. The lookalike check is what flags that domain.
+            # Both decoded, so a Unicode domain and its xn-- form match. The lookalike check
+            # covers that domain.
             if shown_domain and base_domain(decode_idn(shown_domain)) != base_domain(decode_idn(href_host)):
                 mismatches.append(f"text shows {shown_domain} but goes to {href_host}")
                 break
 
-    # A tag in the middle of a domain is where CSS the tool doesn't read could hide part of the
-    # text or add to it, so the tool can't say what the reader sees there. With no mismatch,
-    # that makes the check inconclusive, since a pass would promise more than it knows. With
-    # one, the check flags, and the split is a caveat.
+    # A tag inside a domain is where CSS could change what the reader sees. On its own that
+    # makes the check inconclusive, and next to a mismatch it's a caveat.
     split = list(dict.fromkeys(split))
     split_text = (f"A tag sits in the middle of {join_first_five(split)}, where CSS could change what the reader "
                   "sees. Check what the link looks like in a mail client, without clicking it.")
@@ -63,9 +59,8 @@ def check_link_mismatch(parsed: ParsedEmail) -> Check:
 
 
 def _shown_domain(text: str) -> str | None:
-    # The first domain in the text. A URL written in it is only read up to its path, since the
-    # reader takes the start as the site: in https://paypal.com@evil.com/ that's paypal.com,
-    # and in http://10.0.0.5/app/login.aspx, login.aspx isn't a site anyone would trust.
+    # A URL is only read up to its path, since the reader takes the start as the site:
+    # https://paypal.com@evil.com/ shows paypal.com
     text = TEXT_URL.sub(lambda m: re.match(r"(?:https?:/*)?[^/\\?#]*", m.group(), re.I).group(), text)
     return next(iter(domains_in_text(text)), None)
 

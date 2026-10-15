@@ -13,8 +13,7 @@ from .domains import PUBLIC_SUFFIX_FILE, list_date
 LIST_URL = "https://publicsuffix.org/list/public_suffix_list.dat"
 # The list is about 330 KB. This stops a server sending something far bigger from filling memory.
 MAX_LIST_BYTES = 5 * 1024 * 1024
-# Seconds to wait for the server to connect, or to send more, before giving up. It's not a
-# limit on the whole download, which you can stop with Ctrl+C.
+# Seconds to wait to connect or for more data, not for the whole download
 TIMEOUT = 30
 # A whole list has both sections, in this order. A download that was cut short, or a block
 # page from a company's web proxy, doesn't.

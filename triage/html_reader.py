@@ -10,16 +10,14 @@ from urllib.parse import urljoin
 from .domains import C0_OR_SPACE, TAB_OR_NEWLINE, browser_url, domains_in_text, normalize_unicode, url_host
 from .models import Link
 
-# Real emails have one <base> tag at most. Every link is read against each base (see
-# _collect), so without a limit, thousands of both would take minutes.
+# Real emails have one <base> tag at most. Every link is read against each, so thousands of
+# both would take minutes.
 MAX_BASES = 10
 
-# Python's parser hands over what's inside these as text, but a browser doesn't show it:
-# scripts, CSS, the page title, and what's shown instead of a frame or plugin
+# Python's parser hands over what's inside these as text, but a browser doesn't show it
 UNSHOWN_ELEMENTS = {"script", "style", "title", "iframe", "noembed", "noframes"}
 
-# Attributes that make a mail client load a URL (an image, a frame) or send a form to it.
-# Links and <base> are read on their own.
+# Attributes that make a mail client load a URL or send a form to it
 URL_ATTRIBUTES = {"src", "action", "formaction", "background", "poster"}
 
 # Elements with no content and no end tag
@@ -32,9 +30,8 @@ BLOCK_ELEMENTS = {"address", "article", "aside", "blockquote", "br", "caption", 
                   "h2", "h3", "h4", "h5", "h6", "header", "hr", "li", "main", "menu", "nav", "ol", "p",
                   "pre", "section", "summary", "table", "td", "th", "tr", "ul"}
 
-# Browsers end some elements without an end tag, and the tool has to as well, or it would
-# think a hidden element was still open. A new <p>, <div> or other block ends an open <p>
-# (unless a table cell or button is open inside it). The others are below.
+# Browsers end some elements without an end tag, so the tool does too, or a hidden element
+# would seem to stay open. A new block ends an open <p>, unless a cell or button is inside it.
 ENDS_P = {"address", "article", "aside", "blockquote", "center", "details", "dialog", "dd", "div", "dl", "dt",
           "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header",
           "hr", "li", "main", "menu", "nav", "ol", "p", "pre", "section", "summary", "table", "ul"}
@@ -53,26 +50,21 @@ IMPLIED_ENDS = {
     "a": ({"a"}, {"td", "th", "table", "template"}),
 }
 
-# The markers around the parts only Outlook for Windows shows, <!--[if mso]> ... <![endif]-->,
-# and around the parts every other client shows, <!--[if !mso]><!--> ... <!--<![endif]-->.
-# Those second ones have to go whole: a <!-- left behind would start a comment that hides the
-# rest of the email.
+# The markers around parts only Outlook for Windows shows, and parts every other client shows
+# (<!--[if !mso]><!-->). Those go whole, since a <!-- left behind would hide the rest.
 OUTLOOK_MARKERS = re.compile(r"<!--\[if[^\]]{0,100}\]>(?:<!--\s{0,10}-->|<!-->)?"
                              r"|(?:<!--\s{0,10})?<!\[endif\]-->", re.I)
 
-# Marks where a tag sits in a link's text (see _split_by_tags). The text itself can't hold it,
-# since it's taken out of the text first.
+# Marks where a tag sits in a link's text. Any already in the text are taken out first.
 TAG_MARK = "\x00"
 LONE_SEPARATOR = re.compile(r"(?<=\x00)[^\w\x00]+(?=\x00)")
-# Tags that aren't marked: <a> ends the link, the UNSHOWN_ELEMENTS aren't part of the page,
-# and <wbr> only marks where a long word can wrap. CSS can't make a <wbr> show anything (Edge
-# won't draw one as a block or give it ::before text), and long URLs in a link's text often
-# have one after each dot or slash.
+# Not marked: <a> ends the link, and the unshown elements aren't on the page. <wbr> only marks
+# where a word can wrap, CSS can't make it show anything, and long URLs often have one at
+# each dot.
 UNMARKED = UNSHOWN_ELEMENTS | {"a", "wbr"}
 
-# Text or a tag put straight into a table, outside any cell, is moved in front of the table by
-# browsers, so a hidden table doesn't hide it. These are the parts of a table where that
-# happens, and the tags that do belong there.
+# Browsers move text or a tag put straight into a table, outside a cell, in front of the
+# table, so a hidden table doesn't hide it. TABLE_CONTENT is what does belong there.
 TABLE_PARTS = {"table", "thead", "tbody", "tfoot", "tr"}
 TABLE_CONTENT = TABLE_PARTS | {"caption", "colgroup", "col", "td", "th", "form", "input", "script", "style",
                                "template"}
@@ -91,9 +83,9 @@ class _HTMLCollector(HTMLParser):
         self.images = 0  # <img> tags a browser would show
         self.css = []  # the text of every <style> block
         self._unshown = None  # the one of the UNSHOWN_ELEMENTS this is inside
-        # Each open element as (tag, gone, invisible, zero font size, outside), each one worked
-        # out from its parent's and its own, so the last one says whether text here is hidden.
-        # For a table part, outside is what text put straight into it gets instead (see TABLE_PARTS).
+        # Each open element as (tag, gone, invisible, zero font size, outside), worked out from
+        # its parent's, so the last says whether text here is hidden. For a table part, outside
+        # is what text moved out of it gets.
         self._open = []
         self._positions = {}  # where each tag is open in _open, so finding one doesn't need a search
         self._href = None
@@ -116,14 +108,14 @@ class _HTMLCollector(HTMLParser):
         # Font size doesn't shrink an image, so a row of images in a font-size:0 cell still shows
         if tag == "img" and not (gone or invisible) and any(name == "src" and value for name, value in attrs):
             self.images += 1
-        # Browsers use the first href when a tag has two. dict(attrs) would keep the last. An
-        # href with no value (<a href>) is an empty link to a browser. Python's parser gives None.
+        # Browsers use the first href, where dict(attrs) would keep the last. <a href> is an
+        # empty link, which Python's parser gives as None.
         href = next((value or "" for name, value in attrs if name == "href"), None)
         if href is None and tag != "base":
             # SVG links and images can give their address in xlink:href instead
             href = next((value or "" for name, value in attrs if name == "xlink:href"), None)
-        # Trimmed the way browsers trim a link. Python's strip() would also drop a no-break
-        # space, which browsers keep: to them "\xa0https://x.com/" is a relative link, not x.com.
+        # Trimmed the way browsers trim a link. strip() would also drop a no-break space, which
+        # browsers keep.
         if href is not None:
             href = href.strip(C0_OR_SPACE)
         self.other_urls += [value.strip(C0_OR_SPACE) for name, value in attrs
@@ -138,8 +130,7 @@ class _HTMLCollector(HTMLParser):
                 self._full_text = []
                 self._marked = []
         elif (tag == "area" or tag.startswith("v:")) and href is not None:
-            # A clickable part of an image, or a shape Outlook draws as a button
-            # (<v:roundrect href>). Neither has text of its own.
+            # A clickable part of an image, or a shape Outlook draws as a button (<v:roundrect>)
             self.links.append(Link(href, ""))
         elif tag == "base" and href:
             self.bases.append(href)
@@ -147,13 +138,12 @@ class _HTMLCollector(HTMLParser):
             self.other_urls.append(href)  # a stylesheet's <link href>, or an SVG image
 
     def handle_data(self, data):
-        # Text inside <style> or the others in UNSHOWN_ELEMENTS isn't part of the page at all,
-        # so <a>paypal<style> </style>.com</a> reads as paypal.com
+        # Not on the page at all, so <a>paypal<style> </style>.com</a> reads as paypal.com
         if self._unshown == "style":
             self.css.append(data)
         if self._unshown:
             return
-        # Spaces stay in a table, and other text is moved in front of it (see TABLE_PARTS)
+        # Spaces stay in a table, and other text is moved in front of it
         hidden = any(self._context(moved=bool(data.strip())))
         self.pieces.append((re.sub(r"\s+", " ", data), hidden))
         if self._href is not None:
@@ -191,10 +181,9 @@ class _HTMLCollector(HTMLParser):
         self._finish()  # catches an <a> that was never closed
 
     def _break(self, tag, gone):
-        # A block starts or ends here, or a <br>: a new line in the text, and a space in a
-        # link's text, so example.com<br>Sign in isn't read as example.comSign. A block that's
-        # invisible or has font size 0 still takes up its lines. One that's gone doesn't, so
-        # it only gets the space in the link's text read with the hidden parts.
+        # A new line, and a space in a link's text, so example.com<br>Sign in isn't read as
+        # example.comSign. A block that's gone takes no lines, so it only adds the space to the
+        # reading with hidden parts.
         if not gone:
             self.pieces.append(("\n", False))
         if self._href is not None:
@@ -202,8 +191,7 @@ class _HTMLCollector(HTMLParser):
             if not gone:
                 self._text.append(" ")
             if tag == "br":
-                # Read like a tag holding a space: CSS can hide a <br> (display:none) and join
-                # paypal<br>.com into paypal.com, as hiding a space would
+                # Read like a tag holding a space, since CSS can hide a <br> and join paypal<br>.com
                 self._marked.append(" " + TAG_MARK)
 
     def _finish(self):
@@ -246,10 +234,9 @@ class _HTMLCollector(HTMLParser):
 
 
 def _hiding(tag, attrs, parent) -> tuple[bool, bool, bool]:
-    # (gone, invisible, zero font size) for an element. Gone means a browser draws nothing of
-    # it: display:none, the hidden attribute, opacity 0, or a <template>, and nothing inside
-    # can undo that. Visibility and font size pass down too, but a child can set them back,
-    # as email templates do with font-size:0 on a row to close the gaps between its images.
+    # Gone means nothing is drawn (display:none, hidden, opacity 0, <template>), and nothing
+    # inside can undo it. A child can set visibility and font size back, as templates do with
+    # font-size:0 on a row of images.
     style = _style(attrs)
     gone, invisible, zero_font = parent
     # The hidden attribute works through display, so display:inline shows the element again
@@ -301,11 +288,9 @@ class ParsedHTML:
 def read_html(html: str, warnings) -> ParsedHTML:
     # One HTML part's links, other URLs and text, with relative links read against its <base>
     parsed = _collect(html, warnings)
-    # Outlook for Windows shows what's inside <!--[if mso]> ... <![endif]-->, and every other
-    # client reads it as a comment, so a link can be there for Outlook users only. A link can
-    # start in one of these parts and end in another, with its text between them, so the HTML
-    # is read again with the markers taken out, the way Outlook reads it, and the links only
-    # that reading finds are added. Its text isn't, since other clients don't show it.
+    # Outlook for Windows shows what's inside <!--[if mso]>, which other clients read as a
+    # comment, so a link can be there for Outlook users only. The HTML is read again the way
+    # Outlook reads it, and only the new links are added, not its text.
     if re.search(r"<!--\[if", html, re.I):
         outlook_html = OUTLOOK_MARKERS.sub("", html)
         outlook_warnings = []
@@ -324,16 +309,14 @@ def _collect(html: str, warnings) -> ParsedHTML:
         collector.feed(html)
         collector.close()
     except Exception as e:
-        # Python's HTMLParser no longer raises on broken markup like <![...]>, as older versions
-        # did, but a bug in _HTMLCollector still could. Keep what was found before that point.
+        # HTMLParser no longer raises on broken markup, but a bug here still could. What was
+        # found before it is kept.
         collector._finish()
         warnings.append(f"HTML body couldn't be fully parsed ({type(e).__name__}), links after that point may be missing")
 
-    # <base href="https://evil.com/"> makes <a href="/login"> go to evil.com. This is the
-    # baseStriker trick. Browsers use the first <base>, but skip one inside <template> or <svg>,
-    # and Python's parser can't tell where a tag sits. So links are read against every base,
-    # and a decoy in front can't hide the real one. A base is read like a link, so one a
-    # browser accepts (https:\\evil.com\) works here too.
+    # <base href="https://evil.com/"> sends <a href="/login"> to evil.com (baseStriker).
+    # Browsers use the first <base>, but skip one in <template> or <svg>, which Python's parser
+    # can't tell, so links are read against every base and a decoy can't hide the real one.
     bases = list(dict.fromkeys(browser_url(base) for base in collector.bases))
     if len(bases) > MAX_BASES:
         warnings.append(f"The HTML has {len(bases)} different <base> tags, which set where links go. "
@@ -354,11 +337,9 @@ def _collect(html: str, warnings) -> ParsedHTML:
 
 
 def _split_by_tags(marked: str) -> list[str]:
-    # Domains in a link's text with a tag in the middle of them: pay<b>pal</b>.com, or
-    # paypal<span class="x"> </span>.com. A tag is where CSS could hide part of the text or
-    # add to it, so what the reader sees there can't be known. The text is also read without
-    # the tags that hold only spaces or punctuation, since hiding one of those is how a domain
-    # gets split. A domain inside one tag's text isn't counted.
+    # Domains split by a tag in a link's text, like pay<b>pal</b>.com, where CSS could hide or
+    # add text. Tags holding only spaces or punctuation are also dropped, since hiding one is
+    # how a domain gets split. A domain inside one tag's text isn't counted.
     if TAG_MARK not in marked:
         return []
     whole = set(domains_in_text(marked.replace(TAG_MARK, " ")))
@@ -369,11 +350,9 @@ def _split_by_tags(marked: str) -> list[str]:
 
 
 def _css_added_text(css: str) -> list[str]:
-    # Text a <style> block adds to the page, like .x::before { content: "." }, which the reader
-    # sees and the tool doesn't. Escapes are decoded (\2e is a dot). Only text with a letter,
-    # digit, dot or @ counts, and text taken from an attribute (attr(title)), since icon fonts
-    # (content: "\f101", a symbol) and layout tricks (content: "") add no readable text. An
-    # image (content: url("...")) isn't text either: email trackers load one that way.
+    # Text a <style> block adds, like .x::before { content: "." }. Only text with a letter,
+    # digit, dot or @ counts, or attr(), since icon fonts and layout tricks add nothing readable.
+    # url() is an image, often a tracker.
     css = re.sub(r"/\*.*?(?:\*/|\Z)", "", css, flags=re.S)
     found = []
     for value in re.findall(r"content\s*:([^;}]*)", css, re.I):
@@ -386,18 +365,15 @@ def _css_added_text(css: str) -> list[str]:
 
 
 def _css_unescape(match) -> str:
-    # \2e is the character with that hex number, a dot. Past the last character there is, it's
-    # the replacement character, as in CSS.
+    # \2e is a dot. Past the last character there is, it's the replacement character, as in CSS.
     number = int(match.group(1), 16)
     return chr(number) if number <= 0x10FFFF else "\ufffd"
 
 
 def _hidden_in_words(pieces) -> list[str]:
-    # Hidden text with a shown letter or digit right before and after it. The reader of
-    # Mic<span style="font-size:0">xyz</span>rosoft sees Microsoft, and a filter reads
-    # Micxyzrosoft (the ZeroFont trick). Hidden spaces and invisible characters (&zwnj;) alone
-    # are left out, since templates hide the gaps between images that way, and a filter that
-    # drops invisible characters reads the word right.
+    # Hidden text between shown letters: Mic<span style="font-size:0">xyz</span>rosoft shows as
+    # Microsoft, and a filter reads Micxyzrosoft (ZeroFont). Hidden spaces and invisible
+    # characters alone are left out, since templates hide the gaps between images that way.
     runs = [(hidden, "".join(text for text, _ in group)) for hidden, group in groupby(pieces, key=lambda p: p[1])]
     found = []
     for i in range(1, len(runs) - 1):
@@ -423,10 +399,9 @@ def _read_against_bases(href: str, bases: list[str]) -> list[str]:
 
 
 def _uses_base(href: str) -> bool:
-    # A link with no host of its own is read against the base. Links with a host keep it,
-    # except one with a scheme but not two slashes: on an https base, browsers read
-    # https:paypal.com as a page on the base's site. urljoin does the same, and leaves the
-    # link as written when its scheme isn't the base's: http:paypal.com still goes to paypal.com.
+    # A link with no host uses the base, and so does one with a scheme but not two slashes: on
+    # an https base, https:paypal.com is a page on the base's site. urljoin leaves one with
+    # another scheme (http:paypal.com) as written.
     if not url_host(href):
         return True
     return re.match(r"[a-z][a-z\d+.-]*:(?![/\\]{2})", href.translate(TAB_OR_NEWLINE), re.I) is not None

@@ -17,34 +17,27 @@ REVERSE_DNS = re.compile(r"(?<![\w.-])([0-9]{1,3}(?:\.[0-9]{1,3}){3})\.in-addr\.
 ARPA_NAME = re.compile(r"(?<![\w.-])[\w.-]+\.arpa(?![\w-])", re.I)
 HASH = re.compile(r"(?<![0-9a-z])(?:[0-9a-f]{64}|[0-9a-f]{40}|[0-9a-f]{32})(?![0-9a-z])", re.I)
 
-# The ways people write an indicator so it can't be clicked: evil[.]com, evil (dot) com,
-# x[@]evil.com, https[:]//, and hxxp or h**p for http. Spaces in front are only taken from the
-# start of a run, since trying every space in a long run would take minutes.
+# Defanged forms: evil[.]com, evil (dot) com, x[@]evil.com, https[:]//, hxxp and h**p. Spaces
+# in front are only taken from the start of a run, since trying each one would take minutes.
 BRACKETED = re.compile(r"(?<![ \t])[ \t]*[\[({]\s*(\.|dot|@|at|:|://|/)\s*[\])}][ \t]*", re.I)
 BROKEN_SCHEME = re.compile(r"(?<![a-z])h[x*]{2}p(?=s?:)", re.I)
 
 
 def refang(text: str) -> str:
-    # Turns defanged indicators back into real ones, so they can be found. evil\.com, the way
-    # a regex writes it, is read as evil.com too.
+    # evil\.com, the way a regex writes it, counts as defanged too
     text = BRACKETED.sub(lambda m: {"dot": ".", "at": "@"}.get(m.group(1).lower(), m.group(1)), text)
     return BROKEN_SCHEME.sub("http", text).replace("\\.", ".")
 
 
 def defang(indicator: str) -> str:
-    # hxxp, [.] and [@] stop a chat app, ticket system or mail client turning the indicator into
-    # a live link that someone could click. refang() turns it back.
+    # So a chat app, ticket system or mail client doesn't turn it into a live link
     indicator = re.sub(r"^http(?=s?:)", "hxxp", indicator, flags=re.I)
     return indicator.replace(".", "[.]").replace("@", "[@]")
 
 
 def from_email(parsed: ParsedEmail, origin: Origin | None) -> Indicators:
-    # What the email links to, loads, and came from: its links (including URLs written in the
-    # plain text part) and other URLs, the sender addresses, the origin server and the
-    # attachment hashes. A domain only mentioned in the text isn't listed, since phishing names
-    # the real brand's domain to look genuine, and blocking that would be a mistake. Neither is
-    # a URL written as an HTML link's text, since that's only what the link shows, not where
-    # it goes.
+    # What the email links to, loads and came from. Domains only mentioned in the text aren't
+    # listed, since phishing names the real brand to look genuine, and neither is a link's text.
     urls, hosts, emails = [], [], []
     for href in [link.href for link in parsed.links] + parsed.other_urls:
         host = url_host(href)
@@ -63,10 +56,8 @@ def from_email(parsed: ParsedEmail, origin: Origin | None) -> Indicators:
 
 
 def from_text(text: str) -> Indicators:
-    # Alert text pasted by an analyst or exported from a tool. Defanged indicators are turned
-    # back first, and bare domains, IPs and hashes count, since alerts list them that way.
-    # URLs and addresses are taken out before the rest is searched, so a file name in a URL's
-    # path (/files/report.zip) isn't read as a domain.
+    # Bare domains, IPs and hashes count, since alerts list them that way. URLs and addresses
+    # are taken out first, so a file name in a URL's path isn't read as a domain.
     text = refang(text)
     urls, hosts = [], []
     for url in urls_in_text(text):
@@ -79,18 +70,14 @@ def from_text(text: str) -> Indicators:
     emails = EMAIL.findall(text)
     hosts += [email.rpartition("@")[2] for email in emails]
     text = EMAIL.sub(" ", text)
-    # Paths aren't read for domains either, only what's in front of them: evil.com/files/run.sh
-    # gives evil.com, and C:\Tools\setup.py gives nothing. .sh and .py are real TLDs, so the
-    # file names would be listed as domains.
+    # Paths are dropped too, since .sh and .py are real TLDs: evil.com/run.sh gives evil.com
     hosts += domains_in_text(re.sub(r"(?<=[\w:-])[/\\]\S*", " ", text)) + _ips_in(text)
     return _indicators(urls, hosts, emails, [found.lower() for found in HASH.findall(text)])
 
 
 def _requested_url(href: str, host: str) -> str:
-    # The URL the browser asks for: the link read the way a browser reads it, with the host
-    # written the way DNS writes it, as in the domain list. http://%70aypa1.com/ is
-    # http://paypa1.com/, http://3627734532/ is http://216.58.214.4/, and a Cyrillic pаypal.com
-    # is xn--pypal-4ve.com, so it doesn't look like the real one.
+    # The URL the browser asks for, with the host as DNS writes it, so http://3627734532/ is
+    # http://216.58.214.4/ and a Cyrillic pаypal.com doesn't look like the real one
     url = browser_url(href)
     try:
         parts = urlsplit(url)
@@ -114,8 +101,8 @@ def _ips_in(text: str) -> list[str]:
             # A label in front, like ip:2001:db8::1, leaves one colon at the start
             token = token.rstrip(".")
             token = token[1:] if re.match(":[^:]", token) else token
-            # Two groups of digits at least, since PowerShell's [Convert]::FromBase64String
-            # and std::string leave ::F and d::, which are valid IPv6 addresses
+            # At least two groups, since code like [Convert]::FromBase64String leaves ::F, a
+            # valid IPv6 address
             if len([group for group in token.split(":") if group]) >= 2:
                 candidates.append(token)
     return [ip for ip in candidates if is_ip(ip)]

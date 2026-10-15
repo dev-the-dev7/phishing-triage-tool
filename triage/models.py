@@ -47,10 +47,8 @@ class Check:
     result: Result
     strength: Strength
     evidence: str
-    # What the result doesn't cover: something close to this check that it couldn't check, for
-    # the analyst to look at whatever the result says, or a pointer to a related check. Evidence
-    # is why the check got its result, and a caveat never is. When the check can't tell, the
-    # result is inconclusive, not a pass with a caveat.
+    # What the result doesn't cover, for the analyst to look at whatever it says. A caveat is
+    # never why the check got its result: when it can't tell, it's inconclusive.
     caveats: list[str] = field(default_factory=list)
 
     def __post_init__(self):

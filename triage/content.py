@@ -18,9 +18,8 @@ def check_hidden_text(parsed: ParsedEmail) -> list[Check]:
 
 
 def check_css_added_text(parsed: ParsedEmail) -> list[Check]:
-    # The reader sees text a <style> block adds to the page (.x::before { content: "." }), but
-    # the tool doesn't read CSS, so it can't check that text. Weak, since templates add small
-    # decorations this way too. The text is shown so the analyst can judge it.
+    # The reader sees this text and the tool can't check it. Weak, since templates add small
+    # decorations this way too.
     if not parsed.css_added_text:
         return []
     shown = [f'"{text}"' if len(text) <= 40 else f'"{text[:40]}..."' for text in parsed.css_added_text]
@@ -30,9 +29,8 @@ def check_css_added_text(parsed: ParsedEmail) -> list[Check]:
 
 
 def check_image_only(parsed: ParsedEmail) -> list[Check]:
-    # Text in a picture can't be read by filters or by this tool, which is why phishing sends
-    # QR codes and screenshots of text. It's only flagged when the email shows no text at all,
-    # since a logo or a photo next to some text is normal.
+    # Filters can't read text in a picture, which is why phishing sends QR codes and screenshots.
+    # Only flagged with no text at all, since a logo next to text is normal.
     shown = parsed.html_text if parsed.html_body else parsed.text_body
     images = parsed.html_images + sum(1 for a in parsed.attachments if a.content_type.startswith("image/"))
     if not images or re.search(r"[^\W_]", shown):

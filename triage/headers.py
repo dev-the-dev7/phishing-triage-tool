@@ -69,10 +69,8 @@ def _check_single_result(name: str, clauses: list[tuple[str, str]], strength: St
 
 
 def _check_dkim(clauses: list[tuple[str, str]], parsed: ParsedEmail, source: str) -> Check:
-    # Several DKIM signatures on one message are normal, and one valid signature is enough.
-    # But it has to be from the From domain's organization, the same alignment DMARC
-    # requires. Anyone can sign with their own domain, so a pass for evil.com says nothing
-    # about mail claiming to be from paypal.com.
+    # One valid signature is enough, but it has to be from the From domain's organization, as
+    # DMARC requires. Anyone can sign with their own domain.
     name, strength = "DKIM", Strength.MEDIUM
     if not clauses:
         return Check(name, Result.INCONCLUSIVE, strength, f"Not reported ({source})")
@@ -101,9 +99,8 @@ def _check_dkim(clauses: list[tuple[str, str]], parsed: ParsedEmail, source: str
 
 
 def _check_dmarc(clauses: list[tuple[str, str]], parsed: ParsedEmail, source: str) -> Check:
-    # DMARC checks the From domain the provider read, which it names in header.from. With
-    # two From headers, or two addresses in one, it can check one while the mail client
-    # shows the other, so a pass for a different domain says nothing about the From shown.
+    # DMARC names the From it checked in header.from. With two Froms, it can check one while
+    # the mail client shows the other.
     check = _check_single_result("DMARC", clauses, Strength.STRONG, source)
     from_domain = parsed.from_addr.domain if parsed.from_addr else ""
     checked = {base_domain(domain) for _, domain in clauses if domain}
@@ -115,13 +112,11 @@ def _check_dmarc(clauses: list[tuple[str, str]], parsed: ParsedEmail, source: st
 
 
 def _signed_body_length(signatures: list[str], from_base: str) -> str | None:
-    # A DKIM-Signature with l= covers only the first l bytes of the body. Anyone with a
-    # signed copy can add text after that, like a phishing link, and it still passes.
-    # Returns the l= value from a signature by the From domain's organization, if one has it.
-    # Any such signature counts, since Microsoft's header doesn't say which signature passed.
+    # l= signs only the first l bytes of the body, so anyone with a signed copy can add a link
+    # after them. Any signature by the From's organization counts, since Microsoft's header
+    # doesn't say which one passed.
     for signature in signatures:
-        # Tags are name=value pairs split by ";": v=1; d=paypal.com; l=50; ...
-        # Tag names are case-sensitive (RFC 6376), so L=50 isn't a length and verifiers ignore it.
+        # v=1; d=paypal.com; l=50; ... Names are case-sensitive, so verifiers ignore L=50.
         tags = {}
         for part in signature.split(";"):
             tag, _, value = part.partition("=")
@@ -132,13 +127,11 @@ def _signed_body_length(signatures: list[str], from_base: str) -> str | None:
 
 
 def _parse_auth_results(header: str) -> tuple[str, dict[str, list[tuple[str, str]]]]:
-    # Each method's results, with the domain each one is about ("" when it isn't given):
-    # {"spf": [("pass", "")], "dkim": [("fail", "paypal.com"), ("pass", "evil.com")],
-    #  "dmarc": [("fail", "paypal.com")]}
+    # {"dkim": [("fail", "paypal.com"), ("pass", "evil.com")], ...}, with "" for no domain
 
-    # Drop "quoted strings" and (comments) first: the sender controls text in them, and
-    # smtp.mailfrom="x;dkim=pass"@evil.com would add a fake pass. Quotes go first, since a quoted
-    # address can hold a "(". An unclosed quote runs to the end. [^()] keeps the comment regex fast.
+    # Quoted strings and comments go first, since the sender controls them, and
+    # smtp.mailfrom="x;dkim=pass"@evil.com would add a fake pass. Quotes before comments,
+    # since a quoted address can hold a "(". An unclosed quote runs to the end.
     header = re.sub(r'"(?:[^"\\]|\\.)*"?', "", header)
     header = re.sub(r"\([^()]*\)", "", header)
     first, _, rest = header.partition(";")
@@ -155,9 +148,8 @@ def _parse_auth_results(header: str) -> tuple[str, dict[str, list[tuple[str, str
     for clause in rest.split(";"):
         m = re.match(r"\s*([a-z]+)\s*=\s*([a-z]+)", clause, re.I)
         if m:
-            # header.d is the DKIM signing domain. Gmail gives header.i instead, an address like
-            # @paypal.com whose domain is the signer's or one below it. header.from is the
-            # From domain DMARC checked.
+            # header.d is the DKIM signer (Gmail gives header.i, an address at it), and
+            # header.from is the From DMARC checked
             about = re.search(r"\bheader\.(?:[di]|from)\s*=\s*(\S+)", clause, re.I)
             domain = about.group(1).rpartition("@")[2].lower() if about else ""
             results.setdefault(m.group(1).lower(), []).append((m.group(2).lower(), domain))
