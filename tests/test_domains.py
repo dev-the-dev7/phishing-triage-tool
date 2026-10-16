@@ -7,8 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from triage.domains import (LOOKALIKE_CHARS, ascii_domain, base_domain, decode_idn, domains_in_text, list_date,
-                            lookalike_forms, normalize_unicode, registered_name, unmask_lookalikes, url_host)
+from triage.domains import (LOOKALIKE_CHARS, ascii_domain, base_domain, decode_idn, domains_in_text, hosting_service,
+                            list_date, lookalike_forms, normalize_unicode, registered_name, unmask_lookalikes,
+                            url_host)
 
 
 def fullwidth(text: str) -> str:
@@ -215,6 +216,22 @@ def test_base_domain_passes_the_public_suffix_list_tests(host, registrable):
 ])
 def test_list_date(text, published):
     assert list_date(text) == published
+
+
+@pytest.mark.parametrize("domain, service", [
+    ("paypal-login.github.io", "github.io"),
+    ("www.paypal-login.github.io", "github.io"),
+    # From SHARED_HOSTING, and from a wildcard rule in the list's private section
+    ("contoso.sharepoint.com", "sharepoint.com"),
+    ("x.y.dev.adobeaemcloud.com", "adobeaemcloud.com"),
+    # Registered by their owners
+    ("www.google.com", ""),
+    ("example.co.uk", ""),
+    ("github.io", ""),
+    ("203.0.113.5", ""),
+])
+def test_hosting_service(domain, service):
+    assert hosting_service(domain) == service
 
 
 def test_registered_name():

@@ -278,15 +278,19 @@ includes the company's root certificate.
 - **A domain registered in the last 30 days is flagged.** Most phishing domains are used
   within days of being registered, and 30 days is a common cut-off for newly registered
   domains in mail and web filters. The date comes from VirusTotal's domain report, so it
-  costs no extra lookup, and it's shown on each domain's line as well. An old domain counts
-  too: a lookalike registered in 2004 is likelier to be a real business one letter from a
-  brand (`netflux.com`), and no rule about spelling can tell that apart. So the check
-  passes when every domain is older, with each one's date in the evidence, and is
-  inconclusive when a domain has no date or wasn't looked up. It's medium strength, since
-  real companies register new domains for campaigns too. Domains the lookalike and
-  brand-joined checks flagged are looked up straight after attachments, so an email with
-  many links can't push them past the limit. The brands' domains, webmail, your own, and
-  names that aren't sent aren't in question.
+  costs no extra lookup, and it's shown on each domain's line as well. A subdomain has its
+  domain's date (`www.google.com` shows `google.com`'s). A name a hosting service handed
+  out (`paypal-login.github.io`, `contoso.sharepoint.com`) only has the service's date,
+  which says nothing about the site, so it isn't shown and the check is inconclusive for
+  that name. The Public Suffix List's private section and `SHARED_HOSTING` tell these
+  apart. An old domain counts too: a lookalike registered in 2004 is likelier to be a real
+  business one letter from a brand (`netflux.com`), and no rule about spelling can tell
+  that apart. So the check passes when every domain is older, with each one's date in the
+  evidence, and is inconclusive when a domain has no date or wasn't looked up. It's medium
+  strength, since real companies register new domains for campaigns too. Domains the
+  lookalike and brand-joined checks flagged are looked up straight after attachments, so an
+  email with many links can't push them past the limit. The brands' domains, webmail, your
+  own, and names that aren't sent aren't in question.
 
 - **A hop that calls itself a Microsoft server has to have a Microsoft IP.** Microsoft's
   Received headers give the name the sending server chose for itself, and the tool skips

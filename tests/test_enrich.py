@@ -177,6 +177,13 @@ def test_a_files_creation_date_isnt_a_registration(server, keys):
     assert "registered" not in texts(look_up(Indicators(hashes=[SHA])))[SHA][0]
 
 
+def test_a_hosted_names_date_isnt_shown(server, keys):
+    # It's when github.io was registered, not when the site was made
+    hosted = "paypal-login.github.io"
+    server.answers[f"{VT}/domains/{hosted}"] = (200, vt_report(undetected=60, created=CREATED_LAST_WEEK))
+    assert "registered" not in texts(look_up(Indicators(domains=[hosted])))[hosted][0]
+
+
 @pytest.mark.parametrize("created", ["2004-03-01", 10 ** 20], ids=["as text", "too big"])
 def test_a_registration_date_that_doesnt_read_is_left_out(server, keys, created):
     # It comes from whois records, so the engines' verdicts still count
@@ -204,6 +211,9 @@ def registered(on: str) -> list[Reputation]:
      "No registration date for x.com"),
     (["x.com"], {"x.com": [Reputation("VirusTotal", LookupStatus.NOT_FOUND, "not found (unknown, not clean)")]},
      Result.INCONCLUSIVE, "No registration date for x.com"),
+    # Even with a date from an older cache, it's the service's
+    (["paypal-login.github.io"], {"paypal-login.github.io": registered("2013-02-08")}, Result.INCONCLUSIVE,
+     "No registration date for paypal-login.github.io (only github.io has one)"),
     # From an edited cache, and in the future
     (["x.com"], {"x.com": registered("soon")}, Result.INCONCLUSIVE, "No registration date for x.com"),
     (["x.com"], {"x.com": registered("2030-01-01")}, Result.INCONCLUSIVE,
@@ -211,8 +221,8 @@ def registered(on: str) -> list[Reputation]:
     # Well-known and internal names aren't in question
     (["paypal.com", "gmail.com", "srv01.corp.local"], {}, Result.PASS,
      "No sender or link domain besides well-known ones and your own"),
-], ids=["new", "today", "29 days", "30 days", "new and no date", "old and no date", "not found", "date doesn't read",
-        "date in the future", "nothing in question"])
+], ids=["new", "today", "29 days", "30 days", "new and no date", "old and no date", "not found", "hosted",
+        "date doesn't read", "date in the future", "nothing in question"])
 def test_domain_age(domains, results, result, evidence):
     check = check_domain_age(Indicators(domains=domains), results)
     assert (check.result, check.evidence) == (result, evidence)

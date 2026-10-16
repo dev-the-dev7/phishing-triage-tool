@@ -50,6 +50,10 @@ SUFFIXES, WILDCARDS, EXCEPTIONS = _read_suffixes(_suffix_list)
 SUFFIX_LIST_DATE = list_date(_suffix_list)
 # Hosting services the list doesn't have yet
 SUFFIXES |= SHARED_HOSTING
+ALL_RULES = (SUFFIXES, WILDCARDS, EXCEPTIONS)
+# The list's first section, the endings registries sell names under. The private section after
+# it is services that hand out names under their own domain, like github.io.
+ICANN_RULES = _read_suffixes(_suffix_list.partition("// ===BEGIN PRIVATE DOMAINS===")[0])
 # Every TLD, and the most labels a rule can match, so a host with thousands is still quick
 TLDS = {rule.rpartition(".")[2] for rule in SUFFIXES | WILDCARDS | EXCEPTIONS}
 MAX_RULE_LABELS = max(rule.count(".") + 2 for rule in SUFFIXES | WILDCARDS | EXCEPTIONS)
@@ -58,6 +62,17 @@ MAX_RULE_LABELS = max(rule.count(".") + 2 for rule in SUFFIXES | WILDCARDS | EXC
 def base_domain(domain: str) -> str:
     # The part one owner controls: mail.paypal.com gives paypal.com, and
     # www.paypal-login.github.io gives paypal-login.github.io
+    return _owned_part(domain, ALL_RULES)
+
+
+def hosting_service(domain: str) -> str:
+    # The service that handed out a name, like github.io for paypal-login.github.io, or "" for
+    # a name someone registered. Only the service's own domain was registered.
+    registered = _owned_part(domain, ICANN_RULES)
+    return registered if registered != base_domain(domain) else ""
+
+
+def _owned_part(domain: str, rules: tuple[set[str], set[str], set[str]]) -> str:
     domain = domain.lower().strip(".")
     if is_ip(domain):
         return domain
@@ -65,18 +80,19 @@ def base_domain(domain: str) -> str:
     # The list writes non-English endings in Unicode, so xn-- labels are compared decoded.
     # Each still decodes to one label, so the count matches.
     names = decode_idn(domain).split(".")
-    return ".".join(labels[-(_suffix_length(names) + 1):])
+    return ".".join(labels[-(_suffix_length(names, rules) + 1):])
 
 
-def _suffix_length(labels: list[str]) -> int:
+def _suffix_length(labels: list[str], rules: tuple[set[str], set[str], set[str]]) -> int:
     # How many labels at the end are the suffix. An exception wins and is registrable itself,
     # then the longest rule, and with none, the last label.
+    suffixes, wildcards, exceptions = rules
     longest_first = range(min(len(labels), MAX_RULE_LABELS), 0, -1)
     for count in longest_first:
-        if ".".join(labels[-count:]) in EXCEPTIONS:
+        if ".".join(labels[-count:]) in exceptions:
             return count - 1
     for count in longest_first:
-        if ".".join(labels[-count:]) in SUFFIXES or (count > 1 and ".".join(labels[-count + 1:]) in WILDCARDS):
+        if ".".join(labels[-count:]) in suffixes or (count > 1 and ".".join(labels[-count + 1:]) in wildcards):
             return count
     return 1
 

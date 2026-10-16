@@ -16,7 +16,7 @@ from urllib.parse import quote, unquote
 
 import requests
 
-from .domains import TLDS, ascii_domain, base_domain, decode_idn, is_ip, url_host
+from .domains import TLDS, ascii_domain, base_domain, decode_idn, hosting_service, is_ip, url_host
 from .iocs import EMAIL
 from .lists import BRANDS, FREE_EMAIL_DOMAINS, OWN_DOMAINS
 from .models import Attachment, Check, Indicators, LookupStatus, Origin, Reputation, Result, Strength, join_first_five
@@ -57,7 +57,7 @@ MAX_ANSWER_BYTES = 5 * 1024 * 1024
 # within the hour.
 CACHE_HOURS = 24
 # Raised when what's kept for a result changes, so an older file is read as empty
-CACHE_VERSION = 4
+CACHE_VERSION = 5
 
 # What's kept from each answer, and its type. Cached entries are checked against it too.
 FACTS = {
@@ -151,8 +151,11 @@ def check_domain_age(found: Indicators, results: dict[str, list[Reputation]]) ->
     for domain in found.domains:
         if _not_sent_because("domain", domain) or _well_known(("domain", domain)):
             continue
+        service = hosting_service(domain)
         registered = _registered(domain, results)
-        if registered is None or registered > today:
+        if service:
+            unknown.append(f"{domain} (only {service} has one)")
+        elif registered is None or registered > today:
             unknown.append(domain)
         elif registered == today:
             new.append(f"{domain} was registered {registered}, today")
@@ -338,7 +341,7 @@ def _ask(service: _Service, kind: str, value: str) -> dict | None:
     # The facts from the service's answer, or None when it has never seen the indicator
     if service.name == "VirusTotal":
         status, answer = _get(service, f"{VT_API}/{_virustotal_path(kind, value)}", {"x-apikey": service.key})
-        read = partial(_virustotal_facts, kind=kind)
+        read = partial(_virustotal_facts, dated=kind == "domain" and not hosting_service(value))
     else:
         status, answer = _get(service, ABUSEIPDB_CHECK, {"Key": service.key, "Accept": "application/json"},
                               {"ipAddress": value, "maxAgeInDays": ABUSEIPDB_DAYS})
@@ -421,14 +424,15 @@ def _wait_for_turn(service: _Service) -> None:
             time.sleep(wait)
 
 
-def _virustotal_facts(answer, kind: str) -> dict:
+def _virustotal_facts(answer, dated: bool) -> dict:
     # Only engines that gave a verdict count, not ones that timed out or can't scan the type
     attributes = answer["data"]["attributes"]
     stats = attributes.get("last_analysis_stats") or {}
     facts = {name: stats.get(name, 0) for name in ("malicious", "suspicious", "undetected", "harmless")}
     facts["checked"] = _date(attributes.get("last_analysis_date"))
-    # A domain's registration date. A file's report has the same field for when it was built.
-    facts["registered"] = _registration_date(attributes) if kind == "domain" else ""
+    # A domain's registration date. A file's report has the same field for when it was built,
+    # and a name a service handed out gets the service's date.
+    facts["registered"] = _registration_date(attributes) if dated else ""
     return facts
 
 
