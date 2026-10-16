@@ -74,6 +74,8 @@ class Origin:
     # The provider server that took the handoff, or that delivered it when there's no outside server
     received_by: str
     earliest_claim: str | None = None  # IP from a lower hop, which could be forged
+    # Hops taken as Microsoft's by their names, as (header number, name, IP)
+    microsoft_hops: list[tuple[int, str, str]] = field(default_factory=list)
 
 
 @dataclass

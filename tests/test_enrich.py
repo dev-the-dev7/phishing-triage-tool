@@ -9,8 +9,8 @@ import pytest
 import requests
 
 from triage import enrich
-from triage.enrich import check_domain_age, look_up
-from triage.models import Attachment, Indicators, LookupStatus, Reputation, Result
+from triage.enrich import check_domain_age, check_microsoft_hops, look_up
+from triage.models import Attachment, Indicators, LookupStatus, Origin, Reputation, Result
 
 VT = "https://www.virustotal.com/api/v3"
 ABUSEIPDB = "https://api.abuseipdb.com/api/v2/check"
@@ -221,6 +221,82 @@ def test_domain_age(domains, results, result, evidence):
 def test_your_own_domains_age_isnt_in_question(monkeypatch):
     monkeypatch.setattr(enrich, "OWN_DOMAINS", ["contoso.com"])
     assert check_domain_age(Indicators(domains=["mail.contoso.com"]), {}).result == Result.PASS
+
+
+HOPS = [(2, "a.prod.outlook.com", "2603:10b6::1"), (3, "b.prod.outlook.com", "2603:10b6::2")]
+
+
+def test_hops_named_as_microsofts_go_after_the_origin(server, keys):
+    # They're only asked about their owner, so VirusTotal doesn't get them
+    origin = Origin("8.8.8.8", "mail.evil.net", "x.outlook.com", microsoft_hops=HOPS)
+    look_up(Indicators(ips=["1.1.1.1", "8.8.8.8"]), origin=origin)
+    assert server.asked() == [f"{ABUSEIPDB}?8.8.8.8", f"{ABUSEIPDB}?2603:10b6::1", f"{ABUSEIPDB}?2603:10b6::2",
+                              f"{ABUSEIPDB}?1.1.1.1", f"{VT}/ip_addresses/1.1.1.1", f"{VT}/ip_addresses/8.8.8.8"]
+
+
+def test_hops_are_looked_up_when_no_server_was_outside_microsoft(server, keys):
+    # A sender calling itself Microsoft's that adds no headers below leaves no origin
+    look_up(Indicators(), origin=Origin(None, None, "x.outlook.com", microsoft_hops=HOPS))
+    assert server.asked() == [f"{ABUSEIPDB}?2603:10b6::1", f"{ABUSEIPDB}?2603:10b6::2"]
+
+
+@pytest.mark.parametrize("domain, owner", [(" Microsoft.COM ", "microsoft.com"), (None, "")])
+def test_the_ips_owner_is_kept(server, monkeypatch, domain, owner):
+    monkeypatch.setenv("ABUSEIPDB_API_KEY", "abuseipdb-key")
+    server.answers[f"{ABUSEIPDB}?8.8.8.8"] = (200, abuseipdb_report(domain=domain))
+    assert look_up(Indicators(ips=["8.8.8.8"]))["8.8.8.8"][0].facts["domain"] == owner
+
+
+def owned_by(domain: str) -> list[Reputation]:
+    return [Reputation("AbuseIPDB", LookupStatus.FOUND, "no reports in the last 90 days", {"domain": domain})]
+
+
+SKIPPED = [Reputation("AbuseIPDB", LookupStatus.SKIPPED, "skipped, over the limit of 10 lookups a run")]
+
+
+@pytest.mark.parametrize("hops, results, result, evidence", [
+    (HOPS, {"2603:10b6::1": owned_by("microsoft.com"), "2603:10b6::2": owned_by("digitalocean.com")}, Result.FLAG,
+     "Received header 3 calls itself b.prod.outlook.com, but AbuseIPDB lists 2603:10b6::2 under digitalocean.com: "
+     "no reports in the last 90 days. The first is the server Microsoft really got the email from, so the Origin "
+     "line may be wrong"),
+    (HOPS, {"2603:10b6::1": owned_by("digitalocean.com"), "2603:10b6::2": owned_by("digitalocean.com")}, Result.FLAG,
+     "Received header 2 calls itself a.prod.outlook.com, but AbuseIPDB lists 2603:10b6::1 under digitalocean.com: "
+     "no reports in the last 90 days; Received header 3 calls itself b.prod.outlook.com, but AbuseIPDB lists "
+     "2603:10b6::2 under digitalocean.com: no reports in the last 90 days. The first is the server Microsoft really "
+     "got the email from, so the Origin line may be wrong"),
+    # The sender wrote every header below the faked one, so their owners don't matter
+    (HOPS, {"2603:10b6::1": owned_by("digitalocean.com"), "2603:10b6::2": SKIPPED}, Result.FLAG,
+     "Received header 2 calls itself a.prod.outlook.com, but AbuseIPDB lists 2603:10b6::1 under digitalocean.com: "
+     "no reports in the last 90 days. The first is the server Microsoft really got the email from, so the Origin "
+     "line may be wrong"),
+    (HOPS, {"2603:10b6::1": owned_by("microsoft.com"), "2603:10b6::2": owned_by("outlook.com")}, Result.PASS,
+     "Every hop named as a Microsoft server has a Microsoft IP, in Received headers 2, 3"),
+    (HOPS[:1], {"2603:10b6::1": owned_by("microsoft.com")}, Result.PASS,
+     "Every hop named as a Microsoft server has a Microsoft IP, in Received header 2"),
+    (HOPS, {"2603:10b6::1": owned_by(""), "2603:10b6::2": SKIPPED}, Result.INCONCLUSIVE,
+     "Who owns these isn't known: Received header 2 (2603:10b6::1): AbuseIPDB doesn't list an owner; "
+     "Received header 3 (2603:10b6::2): skipped, over the limit of 10 lookups a run"),
+    (HOPS[:1], {}, Result.INCONCLUSIVE, "Who owns these isn't known: Received header 2 (2603:10b6::1): not looked up"),
+    ([], {}, Result.PASS, "No hop was taken as Microsoft's on its name alone"),
+], ids=["faked", "two faked", "faked above unknown", "all Microsoft's", "one", "unknown", "not looked up", "none"])
+def test_microsoft_hops(hops, results, result, evidence):
+    check = check_microsoft_hops(Origin(None, None, "x.outlook.com", microsoft_hops=hops), results)
+    assert (check.result, check.evidence, check.caveats) == (result, evidence, [])
+
+
+def test_a_faked_hop_below_an_unknown_one_may_not_be_the_handoff():
+    # The unknown one could be the sender's server, and the faked one a header it wrote
+    check = check_microsoft_hops(Origin(None, None, "x.outlook.com", microsoft_hops=HOPS),
+                                 {"2603:10b6::1": SKIPPED, "2603:10b6::2": owned_by("digitalocean.com")})
+    assert check.result == Result.FLAG
+    assert check.evidence == ("Received header 3 calls itself b.prod.outlook.com, but AbuseIPDB lists 2603:10b6::2 "
+                              "under digitalocean.com: no reports in the last 90 days. The Origin line may be wrong")
+    assert check.caveats == ["Who owns these isn't known, so Microsoft may have got the email from one of them "
+                             "instead: Received header 2 (2603:10b6::1): skipped, over the limit of 10 lookups a run"]
+
+
+def test_no_received_headers_means_no_microsoft_hops():
+    assert check_microsoft_hops(None, {}).result == Result.PASS
 
 
 def test_not_found_is_unknown_and_not_saved(server, keys):

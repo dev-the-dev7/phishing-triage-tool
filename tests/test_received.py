@@ -113,7 +113,27 @@ def test_microsoft_relays_are_skipped_by_name():
         f"from SN6PR02.prod.outlook.com (2603:10b6:5:1d3::10) by SN6PR02MB.namprd02.prod.outlook.com with HTTPS; {DATE}",
         f"from mail.evil.net (203.0.113.5) by SN6PR02.mail.protection.outlook.com (10.1.2.3); {DATE}",
     )
-    assert found == Origin("203.0.113.5", "mail.evil.net", "SN6PR02.mail.protection.outlook.com")
+    assert found == Origin("203.0.113.5", "mail.evil.net", "SN6PR02.mail.protection.outlook.com",
+                           microsoft_hops=[(1, "SN6PR02.prod.outlook.com", "2603:10b6:5:1d3::10")])
+
+
+def test_hops_taken_as_microsofts_by_name_are_listed():
+    # Header 1 has no IP but still counts, so the numbers match the email's. Hops with internal
+    # IPs or other providers' names, and hops below the handoff, aren't listed.
+    found = origin(
+        f"by SN6PR02MB.namprd02.prod.outlook.com with HTTPS; {DATE}",
+        f"from SN6PR02.prod.outlook.com (2603:10b6:5:1d3::10) by SN6PR02MB.namprd02.prod.outlook.com with HTTPS; {DATE}",
+        f"from DM6PR02.prod.outlook.com (10.1.2.4) by SN6PR02.prod.outlook.com; {DATE}",
+        GOOGLE_RELAY,
+        f"from x.mail.protection.outlook.com (203.0.113.9) by mail-sor-f41.google.com; {DATE}",
+        f"from mail.evil.net (198.51.100.7) by x.mail.protection.outlook.com; {DATE}",
+        f"from y.prod.outlook.com (192.0.2.1) by mail.evil.net; {DATE}",
+    )
+    assert found.microsoft_hops == [(2, "SN6PR02.prod.outlook.com", "2603:10b6:5:1d3::10"),
+                                    (5, "x.mail.protection.outlook.com", "203.0.113.9")]
+    # With no handoff, a sender calling itself Microsoft's would otherwise go unseen
+    found = origin(f"from x.prod.outlook.com (203.0.113.9) by SN6PR02.prod.outlook.com; {DATE}")
+    assert (found.ip, found.microsoft_hops) == (None, [(1, "x.prod.outlook.com", "203.0.113.9")])
 
 
 def test_hops_below_the_handoff_are_claims():
@@ -157,7 +177,8 @@ def test_no_received_headers():
     assert origin(f"from 776393159873 named unknown by gmailapi.google.com with HTTPREST; {DATE}") is None
 
 
-@pytest.mark.xfail(reason="README limitation: a sender that calls itself *.outlook.com is skipped as internal",
+@pytest.mark.xfail(reason="README limitation: a sender that calls itself *.outlook.com is skipped as internal, "
+                          "and only --enrich checks its IP's owner",
                    raises=AssertionError)
 def test_sender_claiming_a_microsoft_name():
     found = origin(f"from x.mail.protection.outlook.com (203.0.113.9) by SN6PR02.mail.protection.outlook.com (10.1.2.3); {DATE}",

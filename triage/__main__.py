@@ -8,7 +8,7 @@ from datetime import date
 
 from .checks import run_checks
 from .domains import SUFFIX_LIST_DATE, base_domain
-from .enrich import check_domain_age, look_up
+from .enrich import check_domain_age, check_microsoft_hops, look_up
 from .iocs import defang, from_email, from_text
 from .models import Check, Indicators, Reputation, Result
 from .parser import parse_file
@@ -172,12 +172,13 @@ def _run(args: argparse.Namespace) -> int:
     print()
     found = from_email(parsed, origin)
     if args.enrich:
-        # Lookalike domains are looked up first, and the age check needs the lookups' results
+        # Lookalike domains are looked up first, and these checks need the lookups' results
         flagged = [domain for check in checks if check.result == Result.FLAG for domain in check.domains]
-        results = look_up(found, parsed.attachments, flagged)
+        results = look_up(found, parsed.attachments, flagged, origin)
         _print_indicators(found, results)
         print()
         _print_check(check_domain_age(found, results))
+        _print_check(check_microsoft_hops(origin, results))
     else:
         _print_indicators(found, {})
     _note_old_suffix_list()

@@ -6,6 +6,8 @@ import re
 from .domains import base_domain, has_ip, is_internal_ip
 from .models import Origin, ParsedEmail
 
+MICROSOFT_SERVER_DOMAINS = {"outlook.com", "office365.com", "exchangelabs.com"}
+
 
 def find_origin(parsed: ParsedEmail) -> Origin | None:
     # None when no Received hop has an IP, so the route is unknown
@@ -13,12 +15,15 @@ def find_origin(parsed: ParsedEmail) -> Origin | None:
     if not hops:
         return None
     index = _handoff_index(hops)
+    # Hops above the handoff (all of them when there's none) that were skipped on a Microsoft name
+    microsoft_hops = [(h["position"], h["name"], h["ip"]) for h in hops[:index]
+                      if not is_internal_ip(h["ip"]) and base_domain(h["name"]) in MICROSOFT_SERVER_DOMAINS]
     if index is None:
-        return Origin(None, None, hops[0]["by"])
+        return Origin(None, None, hops[0]["by"], microsoft_hops=microsoft_hops)
 
     hop = hops[index]
     lower_hop_ips = [h["ip"] for h in hops[index + 1:] if not is_internal_ip(h["ip"])]
-    return Origin(hop["ip"], hop["name"], hop["by"], lower_hop_ips[-1] if lower_hop_ips else None)
+    return Origin(hop["ip"], hop["name"], hop["by"], lower_hop_ips[-1] if lower_hop_ips else None, microsoft_hops)
 
 
 def _handoff_index(hops: list[dict]) -> int | None:
@@ -46,11 +51,12 @@ def received_warnings(parsed: ParsedEmail) -> list[str]:
 
 
 def _read_hops(parsed: ParsedEmail) -> list[dict]:
+    # Numbered like the headers, so the analyst can find one
     hops = []
-    for header in parsed.received:
+    for position, header in enumerate(parsed.received, 1):
         hop = _read_hop(header)
         if hop:
-            hops.append(hop)
+            hops.append(hop | {"position": position})
     return hops
 
 

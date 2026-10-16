@@ -18,6 +18,7 @@ import requests
 import triage.__main__ as cli
 from triage import enrich, impersonation
 from triage.__main__ import main
+from triage.models import LookupStatus, Reputation
 
 FIXTURES = Path(__file__).parent / "fixtures"
 # Hidden text, Image only and Text added by CSS are left out, since they're only listed when
@@ -303,7 +304,8 @@ def test_enrich_results_go_under_each_indicator(capsys, tmp_path, monkeypatch):
 def test_enrich_is_given_the_attachments(capsys, tmp_path, monkeypatch):
     # Used to put pictures, like a signature's logo, after the links
     given = []
-    monkeypatch.setattr(cli, "look_up", lambda found, attachments=None, flagged=None: given.append(attachments) or {})
+    monkeypatch.setattr(cli, "look_up", lambda found, attachments=None, flagged=None, origin=None:
+                        given.append(attachments) or {})
     path = write_email(tmp_path, (
         "From: a@example.org\r\nTo: someone@example.net\r\nSubject: s\r\n"
         'Content-Type: multipart/related; boundary="B"\r\n\r\n'
@@ -317,12 +319,31 @@ def test_enrich_is_given_the_attachments(capsys, tmp_path, monkeypatch):
 def test_enrich_checks_how_new_the_domains_are(capsys, monkeypatch):
     # The lookalike check's domain is looked up first, and the age check prints after the lookups
     given = []
-    monkeypatch.setattr(cli, "look_up", lambda found, attachments=None, flagged=None: given.append(flagged) or {})
+    monkeypatch.setattr(cli, "look_up", lambda found, attachments=None, flagged=None, origin=None:
+                        given.append(flagged) or {})
     _, out, _ = run(capsys, FIXTURES / "suspicious.eml", "--enrich")
     assert given == [["paypa1.com"]]
-    assert out.splitlines()[-1] == ("  INCONCLUSIVE medium  Newly registered domain: No registration date for "
+    assert out.splitlines()[-2] == ("  INCONCLUSIVE medium  Newly registered domain: No registration date for "
                                     "paypa1.com; bit.ly")
     assert "Newly registered domain" not in run(capsys, FIXTURES / "suspicious.eml")[1]
+
+
+def test_enrich_checks_who_owns_hops_named_as_microsofts(capsys, tmp_path, monkeypatch):
+    # The hop's IP isn't an indicator, so its owner only shows in the check
+    owner = Reputation("AbuseIPDB", LookupStatus.FOUND, "no reports in the last 90 days, DigitalOcean, LLC in US",
+                       {"domain": "digitalocean.com"})
+    monkeypatch.setattr(cli, "look_up", lambda found, attachments=None, flagged=None, origin=None:
+                        {ip: [owner] for _, _, ip in origin.microsoft_hops})
+    path = write_email(tmp_path, (
+        "Received: from x.prod.outlook.com (203.0.113.9) by SN6PR02.prod.outlook.com;\r\n"
+        " Tue, 6 Oct 2026 10:00:00 +0000\r\nFrom: a@example.org\r\nSubject: s\r\n\r\nHello"))
+    _, out, _ = run(capsys, path, "--enrich")
+    assert "203[.]0[.]113[.]9" not in out
+    assert out.splitlines()[-1] == (
+        "  FLAG         strong  Faked Microsoft hop: Received header 1 calls itself x.prod.outlook.com, but AbuseIPDB "
+        "lists 203.0.113.9 under digitalocean.com: no reports in the last 90 days, DigitalOcean, LLC in US. The first "
+        "is the server Microsoft really got the email from, so the Origin line may be wrong")
+    assert "Faked Microsoft hop" not in run(capsys, path)[1]
 
 
 def test_a_second_ctrl_c_stops_without_a_traceback(capsys, tmp_path, monkeypatch):

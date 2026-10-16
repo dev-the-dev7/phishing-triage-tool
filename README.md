@@ -22,8 +22,8 @@ Work in progress. What works now, with `python -m triage path/to/email.eml`:
   email, or from alert text with `python -m triage --text alert.txt` (`-` reads standard
   input)
 - Reputation lookups with `--enrich`: VirusTotal for hashes, domains, URLs, and IPs, and
-  AbuseIPDB for IPs, with each IP's network and country, and a check for domains
-  registered in the last 30 days
+  AbuseIPDB for IPs, with each IP's network and country, and checks for domains
+  registered in the last 30 days and for hops faked as Microsoft's servers
 - Updating the tool's copy of the Public Suffix List with `python -m triage.update_suffixes`
 
 Planned:
@@ -288,6 +288,19 @@ includes the company's root certificate.
   many links can't push them past the limit. The brands' domains, webmail, your own, and
   names that aren't sent aren't in question.
 
+- **A hop that calls itself a Microsoft server has to have a Microsoft IP.** Microsoft's
+  Received headers give the name the sending server chose for itself, and the tool skips
+  Microsoft's own relays by that name. So a sender calling itself `x.prod.outlook.com` is
+  skipped too, and fake headers it adds below can be reported as the origin. The IP in that
+  hop was written down by Microsoft's server, so it can't be faked. With `--enrich`, each
+  hop taken as Microsoft's on its name is looked up in AbuseIPDB, whose answer names the
+  IP's owner, and one that isn't Microsoft's (`microsoft.com`, or one of its mail domains
+  like `outlook.com`) is flagged. It's strong, and its reports are in the evidence. When
+  every hop above it is Microsoft's, the first such hop is the server Microsoft really got
+  the email from. When one above it couldn't be checked, that one could be, so it's named
+  in a caveat. These IPs are only sent to AbuseIPDB and aren't listed as indicators, since
+  they're meant to be Microsoft's.
+
 - **What would tell the service about your network or your people isn't sent.** Private
   and reserved IPs and internal names (`srv01.corp.local`) mean nothing outside your
   network. Neither are your own domains in `OWN_DOMAINS`: alert text can name your
@@ -303,21 +316,23 @@ includes the company's root certificate.
 - **The free limits decide the order.** VirusTotal's free key allows 4 lookups a minute and
   500 a day, so a run sends at most 8, waiting when it has to, and AbuseIPDB gets at most
   10. AbuseIPDB has no limit a minute, so its lookups go first and are done before any
-  wait. For VirusTotal, attachments go first, then domains the lookalike and brand-joined
-  checks flagged, the sender's domains, the domains links go to, the links, pictures, and
-  IPs, which AbuseIPDB covers too. The sender's domains come before the links' because
-  there are only one to three, and an email can link to a dozen domains and use up every
-  lookup. Pictures are mostly logos, like the ones in an Outlook signature, and VirusTotal
-  rarely has them. A picture is declared as one and named like one (`.png`, `.jpg`), so it
-  opens in a picture viewer and can't run. An SVG can hold scripts, so it goes first with
-  the other files. The brands' real domains, free webmail, and links to them go last.
-  Anything past the limit is shown as skipped. A run only counts its own lookups, so one
-  started straight after another can find VirusTotal's minute used up. It then waits a
-  minute and tries once more, and if it's refused again, the day's limit was reached. When
-  a key is refused, the day's limit is reached, a service can't be reached, or a proxy or
-  sign-in page answers for it, the rest of its lookups show as unavailable without being
-  sent. Ctrl+C during a wait does the same for both services, so the indicators are still
-  shown, and a second Ctrl+C stops the tool.
+  wait. For AbuseIPDB, the origin goes first, then the hops named as Microsoft's servers
+  from the top down, so fake ones added below can't push the real sender's past the limit.
+  For VirusTotal, attachments go first, then domains the lookalike and brand-joined checks
+  flagged, the sender's domains, the domains links go to, the links, pictures, and IPs,
+  which AbuseIPDB covers too. The sender's domains come before the links' because there are
+  only one to three, and an email can link to a dozen domains and use up every lookup.
+  Pictures are mostly logos, like the ones in an Outlook signature, and VirusTotal rarely
+  has them. A picture is declared as one and named like one (`.png`, `.jpg`), so it opens
+  in a picture viewer and can't run. An SVG can hold scripts, so it goes first with the
+  other files. The brands' real domains, free webmail, and links to them go last. Anything
+  past the limit is shown as skipped. A run only counts its own lookups, so one started
+  straight after another can find VirusTotal's minute used up. It then waits a minute and
+  tries once more, and if it's refused again, the day's limit was reached. When a key is
+  refused, the day's limit is reached, a service can't be reached, or a proxy or sign-in
+  page answers for it, the rest of its lookups show as unavailable without being sent.
+  Ctrl+C during a wait does the same for both services, so the indicators are still shown,
+  and a second Ctrl+C stops the tool.
 
 - **Found results are kept for a day** in your own cache folder
   (`%LOCALAPPDATA%\phishing-triage` on Windows), so running the tool again doesn't use up
@@ -360,10 +375,13 @@ includes the company's root certificate.
   once on a known-good email from your own mail system to check the origin it reports.
 
 - **Microsoft's Received header format doesn't include a reverse DNS name**, so for mail
-  received by Outlook the originating server name is the one the sender gave. The tool
-  uses that name to skip Microsoft's internal relays, so a sender that calls itself
+  received by Outlook the originating server name is the one the sender gave. The tool uses
+  that name to skip Microsoft's internal relays, so a sender that calls itself
   `something.outlook.com` is skipped too, and a forged hop below it can be reported as the
-  origin. Only the IP in that hop can be trusted, and checking who owns it needs a lookup.
+  origin. Only `--enrich` checks who owns that hop's IP. A server rented on Microsoft's
+  cloud (Azure) has a Microsoft IP and passes, though Azure blocks sending mail straight to
+  other servers for most accounts. A company's own Exchange server writes names the same
+  way, and only Microsoft 365's are checked.
 
 - **A real signed email resent by someone else (DKIM replay) still passes DKIM and
   DMARC**, since the signature is genuine, and nothing in the headers shows the resend.

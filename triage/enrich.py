@@ -19,7 +19,8 @@ import requests
 from .domains import TLDS, ascii_domain, base_domain, decode_idn, is_ip, url_host
 from .iocs import EMAIL
 from .lists import BRANDS, FREE_EMAIL_DOMAINS, OWN_DOMAINS
-from .models import Attachment, Check, Indicators, LookupStatus, Reputation, Result, Strength, join_first_five
+from .models import Attachment, Check, Indicators, LookupStatus, Origin, Reputation, Result, Strength, join_first_five
+from .received import MICROSOFT_SERVER_DOMAINS
 
 # A file is looked up by its hash and never uploaded, since an upload is shared with every
 # VirusTotal customer. Scanning a URL would take a POST, so a URL VirusTotal hasn't seen
@@ -42,6 +43,9 @@ ABUSEIPDB_DAYS = 90
 # A domain registered this recently is flagged, a common cut-off for newly registered
 # domains in mail and web filters
 NEW_DOMAIN_DAYS = 30
+# The owners AbuseIPDB can list Microsoft's IPs under. It names whoever holds the IP block,
+# and an attacker can't get a block listed under one of these.
+MICROSOFT_IP_OWNERS = {"microsoft.com"} | MICROSOFT_SERVER_DOMAINS
 
 # Seconds to wait for a server to connect, or to send more, before giving up
 TIMEOUT = 20
@@ -53,13 +57,14 @@ MAX_ANSWER_BYTES = 5 * 1024 * 1024
 # within the hour.
 CACHE_HOURS = 24
 # Raised when what's kept for a result changes, so an older file is read as empty
-CACHE_VERSION = 3
+CACHE_VERSION = 4
 
 # What's kept from each answer, and its type. Cached entries are checked against it too.
 FACTS = {
     "VirusTotal": {"malicious": int, "suspicious": int, "undetected": int, "harmless": int, "checked": str,
                    "registered": str},
-    "AbuseIPDB": {"confidence": int, "reports": int, "users": int, "trusted": bool, "isp": str, "country": str},
+    "AbuseIPDB": {"confidence": int, "reports": int, "users": int, "trusted": bool, "isp": str, "country": str,
+                  "domain": str},
 }
 
 # Domains whose reputation is already known, so they're looked up last
@@ -103,17 +108,19 @@ class _NoAnswer(Exception):
         self.stop = stop
 
 
-def look_up(found: Indicators, attachments: list[Attachment] | None = None,
-            flagged: list[str] | None = None) -> dict[str, list[Reputation]]:
+def look_up(found: Indicators, attachments: list[Attachment] | None = None, flagged: list[str] | None = None,
+            origin: Origin | None = None) -> dict[str, list[Reputation]]:
     # Each indicator's results, by its value. Email addresses aren't looked up, but their
     # domains are. The attachments are only used to tell pictures from other files, and
-    # flagged are the domains the lookalike and brand-joined checks flagged.
+    # flagged are the domains the lookalike and brand-joined checks flagged. The origin's
+    # hops taken as Microsoft's get AbuseIPDB lookups too, for their owners.
     virustotal = _Service("VirusTotal", "VT_API_KEY", MAX_VT_LOOKUPS, VT_PER_MINUTE)
     abuseipdb = _Service("AbuseIPDB", "ABUSEIPDB_API_KEY", MAX_ABUSEIPDB_LOOKUPS)
     # AbuseIPDB first: it has no limit a minute, so its lookups are done before any wait for
     # VirusTotal that Ctrl+C might cut short
     order = _virustotal_order(found, attachments or [], flagged or [])
-    lookups = [(abuseipdb, "ip", ip) for ip in found.ips] + [(virustotal, kind, value) for kind, value in order]
+    lookups = ([(abuseipdb, "ip", ip) for ip in _abuseipdb_order(found, origin)]
+               + [(virustotal, kind, value) for kind, value in order])
     cache = _read_cache()
     before = dict(cache)
     results = {}
@@ -163,6 +170,47 @@ def check_domain_age(found: Indicators, results: dict[str, list[Reputation]]) ->
     return Check(name, Result.PASS, strength, "No sender or link domain besides well-known ones and your own")
 
 
+def check_microsoft_hops(origin: Origin | None, results: dict[str, list[Reputation]]) -> Check:
+    # A sender can name itself as a Microsoft server and be skipped as one, but Microsoft's
+    # server wrote down its IP, and the IP's owner can't be faked
+    name, strength = "Faked Microsoft hop", Strength.STRONG
+    hops = origin.microsoft_hops if origin else []
+    faked, unknown, unknown_above = [], [], []
+    for position, server, ip in hops:
+        result = next((r for r in results.get(ip, []) if r.service == "AbuseIPDB"), None)
+        owner = result.facts.get("domain") if result else None
+        if owner in MICROSOFT_IP_OWNERS:
+            continue
+        if owner:
+            if not faked:
+                unknown_above = list(unknown)
+            faked.append(f"Received header {position} calls itself {server}, but AbuseIPDB lists {ip} under "
+                         f"{owner}: {result.text}")
+        elif result is None:
+            unknown.append(f"Received header {position} ({ip}): not looked up")
+        elif result.status == LookupStatus.FOUND:
+            unknown.append(f"Received header {position} ({ip}): AbuseIPDB doesn't list an owner")
+        else:
+            unknown.append(f"Received header {position} ({ip}): {result.text}")
+    if faked:
+        # Each header was written by the server the header above it came from, so the first faked
+        # one is the real handoff only when every hop above it is Microsoft's
+        if unknown_above:
+            return Check(name, Result.FLAG, strength, f"{join_first_five(faked)}. The Origin line may be wrong",
+                         [f"Who owns these isn't known, so Microsoft may have got the email from one of them "
+                          f"instead: {join_first_five(unknown_above)}"])
+        return Check(name, Result.FLAG, strength, f"{join_first_five(faked)}. The first is the server Microsoft "
+                                                  "really got the email from, so the Origin line may be wrong")
+    if unknown:
+        return Check(name, Result.INCONCLUSIVE, strength, f"Who owns these isn't known: {join_first_five(unknown)}")
+    if hops:
+        headers = "header" if len(hops) == 1 else "headers"
+        numbers = ", ".join(str(position) for position, _, _ in hops)
+        return Check(name, Result.PASS, strength, f"Every hop named as a Microsoft server has a Microsoft IP, in "
+                                                  f"Received {headers} {numbers}")
+    return Check(name, Result.PASS, strength, "No hop was taken as Microsoft's on its name alone")
+
+
 def _registered(domain: str, results: dict[str, list[Reputation]]) -> date | None:
     # From the domain's VirusTotal result. A cached one could have been edited, so a date that
     # doesn't read counts as none.
@@ -173,6 +221,13 @@ def _registered(domain: str, results: dict[str, list[Reputation]]) -> date | Non
             except ValueError:
                 return None
     return None
+
+
+def _abuseipdb_order(found: Indicators, origin: Origin | None) -> list[str]:
+    # Hops go top down, so fake ones added below can't push the sender's real one past the limit
+    first = [origin.ip] if origin and origin.ip else []
+    hops = [ip for _, _, ip in origin.microsoft_hops] if origin else []
+    return list(dict.fromkeys(first + hops + found.ips))
 
 
 def _virustotal_order(found: Indicators, attachments: list[Attachment], flagged: list[str]) -> list[tuple[str, str]]:
@@ -392,11 +447,12 @@ def _date(seconds) -> str:
 
 
 def _abuseipdb_facts(answer) -> dict:
-    # The network and country can be missing (null), and only a real true counts as trusted
+    # The network, country and owner can be missing (null), and only a real true counts as trusted
     data = answer["data"]
     return {"confidence": data["abuseConfidenceScore"], "reports": data["totalReports"],
             "users": data["numDistinctUsers"], "trusted": data.get("isWhitelisted") is True,
-            "isp": (data.get("isp") or "").strip(), "country": (data.get("countryCode") or "").strip()}
+            "isp": (data.get("isp") or "").strip(), "country": (data.get("countryCode") or "").strip(),
+            "domain": (data.get("domain") or "").strip().lower()}
 
 
 def _valid(service: str, facts) -> bool:
