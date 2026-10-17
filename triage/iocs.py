@@ -36,6 +36,14 @@ def defang(indicator: str) -> str:
     return indicator.replace(".", "[.]").replace("@", "[@]")
 
 
+def defang_text(text: str) -> str:
+    # Every link, domain and address in a sentence, without touching the sentence's own full
+    # stops, which aren't between two letters
+    text = re.sub(r"(?<![a-z])http(?=s?:)", "hxxp", text, flags=re.I)
+    text = re.sub(r"(?<=[\w-])\.(?=[\w-])", "[.]", text)
+    return re.sub(r"(?<=[\w.+%-])@(?=[\w-])", "[@]", text)
+
+
 def from_email(parsed: ParsedEmail, origin: Origin | None) -> Indicators:
     # What the email links to, loads and came from. Domains only mentioned in the text aren't
     # listed, since phishing names the real brand to look genuine, and neither is a link's text.

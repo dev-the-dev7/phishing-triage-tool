@@ -1,0 +1,225 @@
+{
+  "format": 1,
+  "email": {
+    "from": {
+      "name": "PayPal Security",
+      "address": "security@paypa1.com"
+    },
+    "to": [
+      {
+        "name": "Jordan Lee",
+        "address": "jordan.lee@example.net"
+      }
+    ],
+    "reply_to": [
+      {
+        "name": "",
+        "address": "case-review@account-resolution.example"
+      }
+    ],
+    "return_path": {
+      "name": "",
+      "address": "bounce@paypa1.com"
+    },
+    "subject": "Action required: your account has been limited",
+    "date": "Mon, 05 Oct 2026 16:14:18 +0000",
+    "message_id": "<20261005161418.4417@paypa1.com>",
+    "link_count": 4,
+    "attachments": [
+      {
+        "filename": "Account_Statement.pdf",
+        "content_type": "application/pdf",
+        "size": 60,
+        "sha256": "043ea8960dc71f654cf0ac9ac501c16d09eed7b0e1528532fe25f122f1cc4f35"
+      }
+    ]
+  },
+  "origin": {
+    "ip": "203.0.113.45",
+    "name": "mail.paypa1.com",
+    "received_by": "mx.example.net",
+    "earliest_claim": "198.51.100.23",
+    "network": null
+  },
+  "summary": {
+    "strongest_flag": "strong",
+    "flagged": {
+      "strong": 4,
+      "medium": 1,
+      "weak": 0
+    },
+    "inconclusive": 1,
+    "passed": 5,
+    "indicators": 11,
+    "warnings": 0
+  },
+  "checks": [
+    {
+      "name": "DMARC",
+      "result": "flag",
+      "strength": "strong",
+      "evidence": "dmarc=fail for paypa1.com (from mx.example.net, ignored 1 untrusted header(s))",
+      "caveats": []
+    },
+    {
+      "name": "Reply-To",
+      "result": "flag",
+      "strength": "strong",
+      "evidence": "Replies go to account-resolution.example, not paypa1.com",
+      "caveats": []
+    },
+    {
+      "name": "Lookalike domain",
+      "result": "flag",
+      "strength": "strong",
+      "evidence": "paypa1.com [link, sender] spells 'paypal' with lookalike characters but isn't paypal.com",
+      "caveats": []
+    },
+    {
+      "name": "Link text vs destination",
+      "result": "flag",
+      "strength": "strong",
+      "evidence": "text shows www.paypal.com but goes to paypa1.com",
+      "caveats": []
+    },
+    {
+      "name": "Display name",
+      "result": "flag",
+      "strength": "medium",
+      "evidence": "\"PayPal Security\" mentions \"paypal\" but the mail is from paypa1.com",
+      "caveats": []
+    },
+    {
+      "name": "DKIM",
+      "result": "inconclusive",
+      "strength": "medium",
+      "evidence": "dkim=none (from mx.example.net, ignored 1 untrusted header(s))",
+      "caveats": []
+    },
+    {
+      "name": "SPF",
+      "result": "pass",
+      "strength": "medium",
+      "evidence": "spf=pass (from mx.example.net, ignored 1 untrusted header(s))",
+      "caveats": []
+    },
+    {
+      "name": "Script, file or app link",
+      "result": "pass",
+      "strength": "medium",
+      "evidence": "Every link opens a web page or an email",
+      "caveats": []
+    },
+    {
+      "name": "Return-Path domain",
+      "result": "pass",
+      "strength": "weak",
+      "evidence": "Return-Path matches the From domain (paypa1.com)",
+      "caveats": []
+    },
+    {
+      "name": "Free webmail sender",
+      "result": "pass",
+      "strength": "weak",
+      "evidence": "paypa1.com isn't on the free webmail list",
+      "caveats": []
+    },
+    {
+      "name": "Brand joined to a word",
+      "result": "pass",
+      "strength": "weak",
+      "evidence": "No sender or link domain has a brand joined to another word",
+      "caveats": []
+    }
+  ],
+  "indicators": [
+    {
+      "type": "URL",
+      "value": "http://paypa1.com/login/verify?case=88213",
+      "defanged": "hxxp://paypa1[.]com/login/verify?case=88213",
+      "named_by": null,
+      "lookups": []
+    },
+    {
+      "type": "URL",
+      "value": "https://bit.ly/3pPx9Qz",
+      "defanged": "hxxps://bit[.]ly/3pPx9Qz",
+      "named_by": null,
+      "lookups": []
+    },
+    {
+      "type": "URL",
+      "value": "http://203.0.113.45/t.gif?u=jordan.lee",
+      "defanged": "hxxp://203[.]0[.]113[.]45/t[.]gif?u=jordan[.]lee",
+      "named_by": null,
+      "lookups": []
+    },
+    {
+      "type": "Domain",
+      "value": "paypa1.com",
+      "defanged": "paypa1[.]com",
+      "named_by": null,
+      "lookups": []
+    },
+    {
+      "type": "Domain",
+      "value": "account-resolution.example",
+      "defanged": "account-resolution[.]example",
+      "named_by": null,
+      "lookups": []
+    },
+    {
+      "type": "Domain",
+      "value": "bit.ly",
+      "defanged": "bit[.]ly",
+      "named_by": null,
+      "lookups": []
+    },
+    {
+      "type": "IP",
+      "value": "203.0.113.45",
+      "defanged": "203[.]0[.]113[.]45",
+      "named_by": null,
+      "lookups": []
+    },
+    {
+      "type": "Email",
+      "value": "security@paypa1.com",
+      "defanged": "security[@]paypa1[.]com",
+      "named_by": null,
+      "lookups": []
+    },
+    {
+      "type": "Email",
+      "value": "case-review@account-resolution.example",
+      "defanged": "case-review[@]account-resolution[.]example",
+      "named_by": null,
+      "lookups": []
+    },
+    {
+      "type": "Email",
+      "value": "bounce@paypa1.com",
+      "defanged": "bounce[@]paypa1[.]com",
+      "named_by": null,
+      "lookups": []
+    },
+    {
+      "type": "SHA-256",
+      "value": "043ea8960dc71f654cf0ac9ac501c16d09eed7b0e1528532fe25f122f1cc4f35",
+      "defanged": "043ea8960dc71f654cf0ac9ac501c16d09eed7b0e1528532fe25f122f1cc4f35",
+      "named_by": null,
+      "lookups": []
+    }
+  ],
+  "not_looked_up": [],
+  "warnings": [],
+  "follow_ups": [
+    "Find other recipients of the same message (search by its Message-ID or sender)",
+    "Check whether anyone clicked a link (proxy or DNS logs for the indicator domains) or replied",
+    "Block the attacker's own sender address and domains, not spoofed or shared ones like a webmail or link-shortening service"
+  ],
+  "analyst": {
+    "verdict": null,
+    "actions_taken": null
+  }
+}

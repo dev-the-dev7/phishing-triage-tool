@@ -2,7 +2,7 @@
 
 import pytest
 
-from triage.iocs import defang, from_email, from_text, refang
+from triage.iocs import defang, defang_text, from_email, from_text, refang
 from triage.models import Address, Attachment, Indicators, Link, Origin, ParsedEmail
 
 SHA256 = "043ea8960dc71f654cf0ac9ac501c16d09eed7b0e1528532fe25f122f1cc4f35"
@@ -44,6 +44,16 @@ def test_refang(defanged, real):
 def test_defang(real, defanged):
     assert defang(real) == defanged
     assert refang(defanged) == real.replace("HTTP", "http")
+
+
+@pytest.mark.parametrize("text, defanged", [
+    ("text shows www.paypal.com but goes to paypa1.com.", "text shows www[.]paypal[.]com but goes to paypa1[.]com."),
+    ("Sign in at https://evil.com/a. Then", "Sign in at hxxps://evil[.]com/a. Then"),
+    ("from first.last@evil.com", "from first[.]last[@]evil[.]com"),
+    ("It passed. Next... done", "It passed. Next... done"),
+])
+def test_defang_text(text, defanged):
+    assert defang_text(text) == defanged
 
 
 ALERT = f"""

@@ -206,23 +206,112 @@ def test_output_in_an_encoding_without_emoji(tmp_path):
     assert "Phishing triage: Prize \N{WRAPPED PRESENT}" in process.stdout.decode("utf-8")
 
 
-@pytest.mark.parametrize("args, flags", [
-    (["--out", "note.md"], "--out"),
-    (["--json", "report.json"], "--json"),
-    (["--out", "note.md", "--json", "report.json"], "--out, --json"),
-])
-def test_options_not_built_yet_stop(capsys, args, flags):
-    # Stops instead of quietly skipping what was asked for
+def test_the_note_and_json_are_written(capsys, tmp_path):
+    note, report = tmp_path / "note.md", tmp_path / "report.json"
+    note.write_text("an older note")
+    code, out, _ = run(capsys, FIXTURES / "suspicious.eml", "--out", note, "--json", report)
+    assert code == 0
+    assert out.splitlines()[1:] == ["Strongest flag: strong",
+                                    "Flagged: 4 strong, 1 medium   Inconclusive: 1   Passed: 5   Indicators: 11",
+                                    f"Wrote {note} and {report}"]
+    assert note.read_bytes().startswith(b"# Phishing triage: ")
+    assert json.loads(report.read_bytes())["format"] == 1
+    # \n endings on Windows too, and no .new file left behind
+    assert b"\r\n" not in note.read_bytes() + report.read_bytes()
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["note.md", "report.json"]
+
+
+def test_alert_text_can_be_written_to_a_note(capsys, tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(ALERT.encode())))
+    code, _, _ = run(capsys, "--text", "-", "--out", tmp_path / "note.md")
+    assert code == 0
+    assert "| Domain | `evil[.]com` |" in (tmp_path / "note.md").read_text()
+
+
+@pytest.mark.parametrize("args, error", [
+    (["--out", ""], "error: --out needs a file name\n"),
+    (["--out", "."], "error: --out names a folder\n"),
+    (["--json", FIXTURES / "clean.eml"], "error: --json names the file being read\n"),
+    (["--out", "same.md", "--json", "./same.md"], "error: --out and --json name the same file\n"),
+    (["--out", "-", "--json", "-"], "error: only one of --out and --json can be - (standard output)\n"),
+], ids=["empty", "folder", "the email", "same file", "both printed"])
+def test_file_names_are_checked_before_the_work(capsys, args, error):
     code, out, err = run(capsys, FIXTURES / "clean.eml", *args)
-    assert code == 1
-    assert err == f"error: not built yet: {flags}\n"
-    assert out == ""
+    assert (code, out, err) == (1, "", error)
 
 
-def test_empty_option_still_counts_as_asked_for(capsys):
-    code, _, err = run(capsys, FIXTURES / "clean.eml", "--out", "")
+def test_alert_text_isnt_replaced_by_its_note(capsys, tmp_path):
+    alert = write_text(tmp_path, ALERT.encode())
+    assert run(capsys, "--text", alert, "--out", alert) == (1, "", "error: --out names the file being read\n")
+    assert alert.read_bytes() == ALERT.encode()
+
+
+@pytest.mark.skipif(os.path.normcase("A") != "a", reason="file names keep their case here")
+def test_names_that_differ_in_case_are_the_same_file_on_windows(capsys):
+    code, _, err = run(capsys, FIXTURES / "clean.eml", "--out", "Report.md", "--json", "report.md")
+    assert (code, err) == (1, "error: --out and --json name the same file\n")
+
+
+@pytest.mark.parametrize("flag", ["--out", "--json"])
+def test_a_dash_prints_the_note_or_json_for_a_pipe(capsys, tmp_path, flag):
+    code, out, err = run(capsys, FIXTURES / "suspicious.eml", flag, "-")
+    assert code == 0
+    assert out.startswith("# Phishing triage: ") if flag == "--out" else json.loads(out)["format"] == 1
+    assert err.splitlines()[1] == "Strongest flag: strong"
+    assert "Wrote" not in err
+
+
+def test_a_pipe_closed_early_ends_quietly(tmp_path):
+    # Like | head, which stops reading after the first line. The report has to be bigger than
+    # the pipe holds, so the tool is still writing when it's closed.
+    links = "".join(f'<a href="https://site{n}.example/">x</a>' for n in range(2_000))
+    path = write_email(tmp_path, f"From: a@example.org\r\nSubject: s\r\nContent-Type: text/html\r\n\r\n{links}")
+    process = subprocess.Popen([sys.executable, "-m", "triage", str(path), "--out", "-"],
+                               cwd=Path(__file__).parent.parent, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process.stdout.readline()
+    process.stdout.close()
+    assert process.stderr.read() == b""
+    assert process.wait() == 1
+
+
+def test_a_dash_and_a_file(capsys, tmp_path):
+    code, out, err = run(capsys, FIXTURES / "suspicious.eml", "--out", "-", "--json", tmp_path / "report.json")
+    assert code == 0
+    assert out.startswith("# Phishing triage: ")
+    assert err.splitlines()[-1] == f"Wrote {tmp_path / 'report.json'}"
+
+
+def test_a_note_that_cant_be_written_still_shows_the_report(capsys, tmp_path):
+    note, report = tmp_path / "note.md", tmp_path / "missing" / "report.json"
+    code, out, err = run(capsys, FIXTURES / "clean.eml", "--out", note, "--json", report)
     assert code == 1
-    assert err == "error: not built yet: --out\n"
+    assert err.startswith(f"error: couldn't write {report}: ")
+    assert err.endswith(f" ({note} was written)\n")
+    assert "\nFindings\n" in out
+
+
+def test_a_write_that_fails_leaves_nothing_behind(tmp_path):
+    # A folder can't be replaced by a file, so this fails after the new file was written
+    (tmp_path / "note.md").mkdir()
+    with pytest.raises(OSError):
+        cli._write(tmp_path / "note.md", "text")
+    assert [path.name for path in tmp_path.iterdir()] == ["note.md"]
+
+
+def test_when_a_pipe_gets_the_note_the_full_report_goes_to_stderr(capsys, tmp_path):
+    code, out, err = run(capsys, FIXTURES / "clean.eml", "--out", "-", "--json", tmp_path / "missing" / "report.json")
+    assert code == 1
+    assert out.startswith("# Phishing triage: ")
+    assert "\nFindings\n" in err
+
+
+def test_the_samples_are_up_to_date(capsys, tmp_path):
+    # To make them again: python -m triage tests/fixtures/suspicious.eml --out samples/suspicious.md
+    # --json samples/suspicious.json
+    samples = Path(__file__).parent.parent / "samples"
+    run(capsys, FIXTURES / "suspicious.eml", "--out", tmp_path / "note.md", "--json", tmp_path / "report.json")
+    assert (tmp_path / "note.md").read_bytes() == (samples / "suspicious.md").read_bytes().replace(b"\r\n", b"\n")
+    assert (tmp_path / "report.json").read_bytes() == (samples / "suspicious.json").read_bytes().replace(b"\r\n", b"\n")
 
 
 def write_text(tmp_path, data: bytes) -> Path:
@@ -275,7 +364,7 @@ def test_enrich_without_keys_still_runs(capsys):
     indicators = section(out, "Indicators, defanged")
     # Said once for the run, not under each indicator
     assert indicators[-1] == ("  VirusTotal: unavailable, VT_API_KEY isn't set (5 indicators, the ones with no "
-                              "VirusTotal line)")
+                              "VirusTotal result)")
     assert indicators[indicators.index("  Domain   bit[.]ly") + 1] == "  IP       203[.]0[.]113[.]45"
     assert indicators[indicators.index("  IP       203[.]0[.]113[.]45") + 1:][:2] == [
         " " * 11 + "AbuseIPDB: skipped, private or reserved address",
@@ -435,7 +524,8 @@ def test_help_describes_what_works(capsys):
     # Named triage, not __main__.py, which python -m would show
     assert out.startswith("usage: triage ")
     assert "The verdict is left to the analyst." in out
-    assert out.count("Not built yet") == 2
+    assert "write the Markdown triage note to FILE, for a ticket" in out
+    assert "write the report as JSON to FILE, for other tools" in out
 
 
 @pytest.mark.parametrize("text, message", [

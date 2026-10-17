@@ -2,8 +2,10 @@
 
 import argparse
 import codecs
+import os
 import sys
 from datetime import date
+from pathlib import Path
 
 from .checks import run_checks
 from .domains import SUFFIX_LIST_DATE
@@ -12,7 +14,7 @@ from .iocs import from_email, from_text
 from .models import Indicators, Result
 from .parser import parse_file
 from .received import find_origin, received_warnings
-from .report import build_report, build_text_report, render_text
+from .report import Report, build_report, build_text_report, render_json, render_markdown, render_summary, render_text
 
 # Alert text is short. This stops a log file passed by mistake from filling memory.
 MAX_TEXT_BYTES = 10 * 1024 * 1024
@@ -41,8 +43,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="extract indicators from a text file instead of an email ('-' reads standard input)",
     )
 
-    parser.add_argument("--out", metavar="FILE", help="write the Markdown triage note to FILE. Not built yet")
-    parser.add_argument("--json", metavar="FILE", help="write the JSON report to FILE. Not built yet")
+    parser.add_argument("--out", metavar="FILE",
+                        help="write the Markdown triage note to FILE, for a ticket ('-' prints it instead)")
+    parser.add_argument("--json", metavar="FILE",
+                        help="write the report as JSON to FILE, for other tools ('-' prints it instead)")
     parser.add_argument(
         "--enrich",
         action="store_true",
@@ -95,15 +99,18 @@ def main(argv=None) -> int:
         # A second Ctrl+C during the lookups, or any other. 130 is the usual exit code for it.
         print("Stopped", file=sys.stderr)
         return 130
+    except BrokenPipeError:
+        # The program reading the output stopped early (| head). Python would complain again
+        # when it flushes at exit, so the rest goes nowhere, as Python's docs suggest.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 1
 
 
 def _run(args: argparse.Namespace) -> int:
-    # Stop instead of quietly skipping what was asked for. "is not None" because an empty
-    # value (--out "") was still asked for.
-    asked = {"--out": args.out is not None, "--json": args.json is not None}
-    not_built = [flag for flag, given in asked.items() if given]
-    if not_built:
-        print(f"error: not built yet: {', '.join(not_built)}", file=sys.stderr)
+    # Checked before the work, which can take minutes with --enrich
+    problem = _output_problem(args)
+    if problem:
+        print(f"error: {problem}", file=sys.stderr)
         return 1
 
     if args.text is not None:
@@ -117,9 +124,7 @@ def _run(args: argparse.Namespace) -> int:
         if args.enrich:
             _say_looking_up(found)
             results = look_up(found)
-        print(render_text(build_text_report(found, results)), end="")
-        _note_old_suffix_list()
-        return 0
+        return _send(build_text_report(found, results), args)
 
     try:
         parsed = parse_file(args.eml)
@@ -138,9 +143,67 @@ def _run(args: argparse.Namespace) -> int:
         results = look_up(found, parsed.attachments, flagged, origin)
         checks += [check_domain_age(found, results), check_microsoft_hops(origin, results)]
     warnings = parsed.parse_warnings + received_warnings(parsed)
-    print(render_text(build_report(parsed, origin, checks, found, results, warnings)), end="")
+    return _send(build_report(parsed, origin, checks, found, results, warnings), args)
+
+
+def _output_problem(args: argparse.Namespace) -> str:
+    source = args.eml if args.text is None else args.text
+    for flag, name in (("--out", args.out), ("--json", args.json)):
+        # "is not None" because an empty value (--out "") was still asked for
+        if name is not None and not name.strip():
+            return f"{flag} needs a file name"
+        if name and name != "-":
+            if Path(name).is_dir():
+                return f"{flag} names a folder"
+            # Writing it would replace the email or alert text, which is the evidence
+            if source != "-" and _same_file(name, source):
+                return f"{flag} names the file being read"
+    if args.out == args.json == "-":
+        return "only one of --out and --json can be - (standard output)"
+    if args.out and args.json and "-" not in (args.out, args.json) and _same_file(args.out, args.json):
+        return "--out and --json name the same file"
+    return ""
+
+
+def _same_file(a: str, b: str) -> bool:
+    # normcase, since Windows file names ignore case
+    return os.path.normcase(Path(a).resolve()) == os.path.normcase(Path(b).resolve())
+
+
+def _send(report: Report, args: argparse.Namespace) -> int:
+    # "-" sends the note or JSON to standard output for a pipe, so the summary goes to stderr
+    outputs = [(name, render) for name, render in ((args.out, render_markdown), (args.json, render_json)) if name]
+    terminal = sys.stderr if "-" in (args.out, args.json) else sys.stdout
+    written = []
+    for name, render in outputs:
+        if name == "-":
+            print(render(report), end="")
+            continue
+        try:
+            _write(Path(name), render(report))
+        except OSError as e:
+            # Printed in full, so a run that waited on lookups isn't lost
+            also = f" ({written[0]} was written)" if written else ""
+            print(f"error: couldn't write {name}: {e.strerror or e}{also}", file=sys.stderr)
+            print(render_text(report), end="", file=terminal)
+            return 1
+        written.append(name)
+    print(render_summary(report, written) if outputs else render_text(report), end="", file=terminal)
     _note_old_suffix_list()
     return 0
+
+
+def _write(path: Path, text: str) -> None:
+    # Written next to the file and then swapped in, so a failed write doesn't leave half a note.
+    # With \n line endings, which Windows would otherwise change.
+    new_file = path.with_name(path.name + ".new")
+    try:
+        with open(new_file, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        new_file.replace(path)
+    except OSError:
+        new_file.unlink(missing_ok=True)
+        raise
 
 
 if __name__ == "__main__":

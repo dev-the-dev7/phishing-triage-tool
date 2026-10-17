@@ -1,12 +1,15 @@
 """Builds the report: everything the tool found about one email or one piece of alert text,
-sorted, and written out for the terminal."""
+sorted, and written out for the terminal, as a Markdown triage note, and as JSON. All three
+come from the same Report, so they can't disagree."""
 
+import json
+import re
 import unicodedata
 from dataclasses import dataclass, field
 
 from .domains import base_domain
 from .enrich import network
-from .iocs import defang
+from .iocs import defang, defang_text
 from .models import (Address, Attachment, Check, Indicators, LookupStatus, Origin, ParsedEmail, Reputation, Result,
                      Strength, join_first_five)
 
@@ -18,6 +21,16 @@ MAX_LONG_CHARS = 1_000
 HASH_NAMES = {32: "MD5", 40: "SHA-1", 64: "SHA-256"}
 RESULT_ORDER = [Result.FLAG, Result.INCONCLUSIVE, Result.PASS]
 STRENGTH_ORDER = [Strength.STRONG, Strength.MEDIUM, Strength.WEAK]
+
+# Suggestions for the analyst, never steps the tool took
+FOLLOW_UPS = [
+    "Find other recipients of the same message (search by its Message-ID or sender)",
+    "Check whether anyone clicked a link (proxy or DNS logs for the indicator domains) or replied",
+    "Block the attacker's own sender address and domains, not spoofed or shared ones like a webmail or "
+    "link-shortening service",
+]
+# Changed when a field is renamed or removed, so tools reading the JSON can tell
+JSON_FORMAT = 1
 
 
 @dataclass
@@ -112,11 +125,10 @@ def _network(results: list[Reputation]) -> str:
 
 def render_text(report: Report) -> str:
     # Every value from the email or a lookup is cut and escaped, our own words aren't
-    title = _shown(report.email.subject or "(no subject)") if report.email else "alert text"
-    lines = [f"Phishing triage: {title}", ""]
+    lines = [_title(report, _shown), ""]
     if report.email:
-        lines += ["Summary", f"  Strongest flag: {report.strongest_flag or 'none'}", f"  {_counts(report)}", "",
-                  "Email", *_email_lines(report), "",
+        lines += ["Summary", f"  Strongest flag: {report.strongest_flag or 'none'}", f"  {'   '.join(_counts(report))}",
+                  "", "Email", *_email_lines(report), "",
                   "Findings", *(line for check in report.findings for line in _check_lines(check)), ""]
     lines += ["Indicators, defanged", *_indicator_lines(report)]
     if report.warnings:
@@ -124,7 +136,27 @@ def render_text(report: Report) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _counts(report: Report) -> str:
+def render_summary(report: Report, written: list[str]) -> str:
+    # For the terminal when the note or JSON was written: what to look at first, and where the files are
+    lines = [_title(report, _shown)]
+    if report.email:
+        lines += [f"Strongest flag: {report.strongest_flag or 'none'}", "   ".join(_counts(report))]
+    else:
+        lines.append(f"Indicators: {len(report.indicators)}")
+    lines += [_missed_line(missed) for missed in report.not_looked_up]
+    if written:
+        lines.append(f"Wrote {' and '.join(map(_shown, written))}")
+    return "\n".join(lines) + "\n"
+
+
+def _title(report: Report, shown) -> str:
+    # Our own words outside shown(), so they can't pass for the email's
+    if report.email is None:
+        return "Phishing triage: alert text"
+    return f"Phishing triage: {shown(report.email.subject) if report.email.subject else '(no subject)'}"
+
+
+def _counts(report: Report) -> list[str]:
     flags = [check.strength for check in report.findings if check.result == Result.FLAG]
     flagged = ", ".join(f"{flags.count(s)} {s}" for s in STRENGTH_ORDER if s in flags) or "none"
     inconclusive = sum(check.result == Result.INCONCLUSIVE for check in report.findings)
@@ -133,24 +165,32 @@ def _counts(report: Report) -> str:
               f"Indicators: {len(report.indicators)}"]
     if report.warnings:
         counts.append(f"Warnings: {len(report.warnings)}")
-    return "   ".join(counts)
+    return counts
 
 
 def _email_lines(report: Report) -> list[str]:
     email = report.email
     lines = [f"  From:        {_address(email.from_addr) if email.from_addr else '(missing)'}"]
-    for label, addresses in (("To:", email.to), ("Reply-To:", email.reply_to),
-                             ("Return-Path:", [email.return_path] if email.return_path else [])):
-        if addresses:
-            lines.append(f"  {label:<12} {join_first_five(list(map(_address, addresses)))}")
-    for label, value in (("Date:", email.date), ("Message-ID:", email.message_id)):
+    for label, addresses in _address_fields(email):
+        lines.append(f"  {label + ':':<12} {join_first_five(list(map(_address, addresses)))}")
+    for label, value in (("Date", email.date), ("Message-ID", email.message_id)):
         if value:
-            lines.append(f"  {label:<12} {_shown(value)}")
-    lines += _origin_lines(report)
+            lines.append(f"  {label + ':':<12} {_shown(value)}")
+    origin, *claim = _origin_parts(report, _shown)
+    lines += [f"  Origin:      {origin}", *(f"{'':15}{line}" for line in claim)]
     lines.append(f"  Links: {email.links}   Attachments: {len(email.attachments)}")
-    lines += [f"    {a.sha256}  {_shown(a.filename)} ({_shown(a.content_type)}, {a.size:,} bytes)"
+    lines += [f"    {a.sha256}  {_file_name(a, _shown)} ({_shown(a.content_type)}, {a.size:,} bytes)"
               for a in email.attachments]
     return lines
+
+
+def _file_name(attachment: Attachment, shown) -> str:
+    return shown(attachment.filename) if attachment.filename else "(no name)"
+
+
+def _address_fields(email: EmailFacts) -> list[tuple[str, list[Address]]]:
+    fields = [("To", email.to), ("Reply-To", email.reply_to), ("Return-Path", [email.return_path])]
+    return [(label, addresses) for label, addresses in fields if addresses and addresses[0]]
 
 
 def _address(address: Address) -> str:
@@ -162,18 +202,17 @@ def _address(address: Address) -> str:
     return f'"{_escape(name)}" <{_shown(address.email)}>'
 
 
-def _origin_lines(report: Report) -> list[str]:
+def _origin_parts(report: Report, shown) -> list[str]:
     origin = report.origin
     if origin is None:
-        return ["  Origin:      unknown, no Received headers with an IP"]
+        return ["unknown, no Received headers with an IP"]
     if origin.ip is None:
-        return [f"  Origin:      none outside {_shown(base_domain(origin.received_by))}, every hop is inside the "
-                "provider"]
-    where = f", {_shown(report.origin_network)}" if report.origin_network else ""
-    lines = [f"  Origin:      {origin.ip} ({_shown(origin.name)}) handed it to {_shown(origin.received_by)}{where}"]
+        return [f"none outside {shown(base_domain(origin.received_by))}, every hop is inside the provider"]
+    where = f", {shown(report.origin_network)}" if report.origin_network else ""
+    parts = [f"{shown(origin.ip)} ({shown(origin.name)}) handed it to {shown(origin.received_by)}{where}"]
     if origin.earliest_claim:
-        lines.append(f"{'':15}lower hops claim {origin.earliest_claim} (could be forged)")
-    return lines
+        parts.append(f"lower hops claim {shown(origin.earliest_claim)} (could be forged)")
+    return parts
 
 
 def _check_lines(check: Check) -> list[str]:
@@ -188,10 +227,147 @@ def _indicator_lines(report: Report) -> list[str]:
         named = f" (from the {row.named_by} check)" if row.named_by else ""
         lines.append(f"  {row.kind:<8} {_shown(defang(row.value), MAX_LONG_CHARS)}{named}")
         lines += [f"{'':11}{result.service}: {_shown(result.text, MAX_LONG_CHARS)}" for result in row.results]
-    for missed in report.not_looked_up:
-        covered = "1 indicator, the one" if missed.count == 1 else f"{missed.count} indicators, the ones"
-        lines.append(f"  {missed.service}: {_shown(missed.text)} ({covered} with no {missed.service} line)")
+    return lines + [f"  {_missed_line(missed)}" for missed in report.not_looked_up]
+
+
+def _missed_line(missed: NotLookedUp) -> str:
+    covered = "1 indicator, the one" if missed.count == 1 else f"{missed.count} indicators, the ones"
+    return f"{missed.service}: {_shown(missed.text)} ({covered} with no {missed.service} result)"
+
+
+def render_markdown(report: Report) -> str:
+    # Values from the email or a lookup go in defanged code spans, so they can't make links
+    lines = [f"# {_title(report, _md)}", ""]
+    if report.email:
+        lines += ["## Summary", "", f"Strongest flag: {report.strongest_flag or 'none'}. {'. '.join(_counts(report))}.",
+                  "", *_md_email(report), "", *_md_findings(report)]
+    lines += ["## Indicators", "", *_md_indicators(report), ""]
+    if report.warnings:
+        lines += ["## Warnings about the tool's reading", "",
+                  *(f"- {_md(warning, MAX_LONG_CHARS)}" for warning in report.warnings), ""]
+    if report.email:
+        lines += ["## Typical follow-ups if confirmed malicious", "", "Suggestions, not actions taken:", "",
+                  *_md_follow_ups(report), ""]
+    lines += ["## Analyst decision", "", "- Verdict:", "- Actions taken:"]
+    return "\n".join(lines) + "\n"
+
+
+def _md_email(report: Report) -> list[str]:
+    email = report.email
+    lines = [f"- From: {_md_address(email.from_addr) if email.from_addr else '(missing)'}"]
+    for label, addresses in _address_fields(email):
+        lines.append(f"- {label}: {join_first_five(list(map(_md_address, addresses)))}")
+    for label, value in (("Date", email.date), ("Message-ID", email.message_id)):
+        if value:
+            lines.append(f"- {label}: {_md(value)}")
+    lines.append(f"- Origin: {'; '.join(_origin_parts(report, _md))}")
+    lines.append(f"- Links: {email.links}. Attachments: {len(email.attachments)}")
+    lines += [f"  - {_file_name(a, _md)} ({_md(a.content_type)}, {a.size:,} bytes), SHA-256 {_code(a.sha256)}"
+              for a in email.attachments]
     return lines
+
+
+def _md_address(address: Address) -> str:
+    return _code(defang_text(_address(address)))
+
+
+def _md_findings(report: Report) -> list[str]:
+    lines = []
+    for heading, result in (("Signals", Result.FLAG), ("Inconclusive", Result.INCONCLUSIVE)):
+        body = []
+        for check in report.findings:
+            if check.result == result:
+                body.append(f"- **{check.name}** ({check.strength}): {_md(check.evidence, MAX_LONG_CHARS)}")
+                body += [f"  - Caveat: {_md(caveat, MAX_LONG_CHARS)}" for caveat in check.caveats]
+        lines += [f"## {heading}", "", *(body or ["None."]), ""]
+    passed = [check.name for check in report.findings if check.result == Result.PASS]
+    # Semicolons, since one check's name has commas in it
+    return lines + ["## Passed", "", "; ".join(passed) or "None.", ""]
+
+
+def _md_indicators(report: Report) -> list[str]:
+    if not report.indicators:
+        return ["None found."]
+    # Without lookups the column would be empty
+    looked_up = report.not_looked_up or any(row.results for row in report.indicators)
+    lines = ["| Type | Indicator, defanged | Reputation |" if looked_up else "| Type | Indicator, defanged |",
+             "|---|---|---|" if looked_up else "|---|---|"]
+    for row in report.indicators:
+        named = f" (from the {row.named_by} check)" if row.named_by else ""
+        cells = [row.kind, _md(defang(row.value), MAX_LONG_CHARS, already_defanged=True) + named]
+        if looked_up:
+            cells.append("; ".join(f"{r.service}: {_md(r.text, MAX_LONG_CHARS)}" for r in row.results))
+        # A pipe ends a table cell even inside a code span, unless it's escaped
+        lines.append(f"| {' | '.join(cell.replace('|', chr(92) + '|') for cell in cells)} |")
+    if report.not_looked_up:
+        lines += ["", *(f"- Not looked up: {_missed_line(missed)}" for missed in report.not_looked_up)]
+    return lines
+
+
+def _md_follow_ups(report: Report) -> list[str]:
+    find, *rest = FOLLOW_UPS
+    lines = [f"- {find}"]
+    if report.email.message_id:
+        lines.append(f"  - Message-ID: {_md(report.email.message_id)}")
+    if report.email.from_addr:
+        lines.append(f"  - Sender: {_md(report.email.from_addr.email)}")
+    return lines + [f"- {suggestion}" for suggestion in rest]
+
+
+def _md(text: str, limit: int = MAX_VALUE_CHARS, already_defanged: bool = False) -> str:
+    shown = _shown(text, limit)
+    return _code(shown if already_defanged else defang_text(shown))
+
+
+def _code(text: str) -> str:
+    # The fence is longer than any run of backticks in the text, so none can close it early, and
+    # text that starts or ends with one is padded, since Markdown takes a space off each end
+    fence = "`" * (max(map(len, re.findall("`+", text)), default=0) + 1)
+    pad = " " if text[:1] in "` " or text[-1:] in "` " else ""
+    return f"{fence}{pad}{text}{pad}{fence}"
+
+
+def render_json(report: Report) -> str:
+    # Not cut or escaped like the note: a tool that blocks or searches needs the exact URL,
+    # and json.dumps writes anything outside ASCII as an escape code
+    email = report.email
+    data = {
+        "format": JSON_FORMAT,
+        "email": None if email is None else {
+            "from": _json_address(email.from_addr), "to": list(map(_json_address, email.to)),
+            "reply_to": list(map(_json_address, email.reply_to)), "return_path": _json_address(email.return_path),
+            "subject": email.subject, "date": email.date, "message_id": email.message_id, "link_count": email.links,
+            "attachments": [{"filename": a.filename, "content_type": a.content_type, "size": a.size,
+                             "sha256": a.sha256} for a in email.attachments],
+        },
+        "origin": None if report.origin is None else {
+            "ip": report.origin.ip, "name": report.origin.name, "received_by": report.origin.received_by,
+            "earliest_claim": report.origin.earliest_claim, "network": report.origin_network or None,
+        },
+        "summary": {
+            "strongest_flag": report.strongest_flag,
+            "flagged": {s: sum(c.result == Result.FLAG and c.strength == s for c in report.findings)
+                        for s in STRENGTH_ORDER},
+            "inconclusive": sum(c.result == Result.INCONCLUSIVE for c in report.findings),
+            "passed": sum(c.result == Result.PASS for c in report.findings),
+            "indicators": len(report.indicators), "warnings": len(report.warnings),
+        },
+        "checks": [{"name": c.name, "result": c.result, "strength": c.strength, "evidence": c.evidence,
+                    "caveats": c.caveats} for c in report.findings],
+        "indicators": [{"type": row.kind, "value": row.value, "defanged": defang(row.value),
+                        "named_by": row.named_by or None,
+                        "lookups": [{"service": r.service, "status": r.status, "text": r.text, "facts": r.facts}
+                                    for r in row.results]} for row in report.indicators],
+        "not_looked_up": [{"service": m.service, "text": m.text, "count": m.count} for m in report.not_looked_up],
+        "warnings": report.warnings,
+        "follow_ups": FOLLOW_UPS if email else [],
+        "analyst": {"verdict": None, "actions_taken": None},
+    }
+    return json.dumps(data, indent=2) + "\n"
+
+
+def _json_address(address: Address | None) -> dict | None:
+    return None if address is None else {"name": address.display_name, "address": address.email}
 
 
 def _shown(text: str, limit: int = MAX_VALUE_CHARS) -> str:

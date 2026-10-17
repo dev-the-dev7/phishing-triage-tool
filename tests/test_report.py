@@ -1,7 +1,9 @@
 """Tests for triage/report.py: how the evidence is sorted, summed up and written out."""
 
-from triage.models import Address, Check, Indicators, LookupStatus, Origin, ParsedEmail, Reputation
-from triage.report import build_report, build_text_report, render_text
+import json
+
+from triage.models import Address, Attachment, Check, Indicators, LookupStatus, Origin, ParsedEmail, Reputation
+from triage.report import build_report, build_text_report, render_json, render_markdown, render_summary, render_text
 
 
 def report_of(checks=(), found=None, results=None, warnings=(), origin=None, **fields):
@@ -106,8 +108,8 @@ def test_lookups_missed_for_the_whole_run_are_said_once():
         "           VirusTotal: 0 of 90 engines flagged it malicious",
         "  Domain   b[.]com",
         "  Domain   c[.]com",
-        "  VirusTotal: skipped, over the limit of 8 lookups a run (2 indicators, the ones with no VirusTotal line)",
-        "  AbuseIPDB: unavailable, ABUSEIPDB_API_KEY isn't set (1 indicator, the one with no AbuseIPDB line)",
+        "  VirusTotal: skipped, over the limit of 8 lookups a run (2 indicators, the ones with no VirusTotal result)",
+        "  AbuseIPDB: unavailable, ABUSEIPDB_API_KEY isn't set (1 indicator, the one with no AbuseIPDB result)",
     ]
 
 
@@ -118,3 +120,133 @@ def test_ips_a_flag_names_are_indicators():
     report = report_of(checks, found=Indicators(ips=["8.8.8.8"]))
     assert [(row.value, row.named_by) for row in report.indicators] == [("8.8.8.8", ""),
                                                                        ("1.1.1.1", "Faked Microsoft hop")]
+
+
+def note_section(note: str, heading: str) -> list[str]:
+    # The lines under a Markdown heading, up to the next one, without the blank ones
+    lines = note.splitlines()
+    start = lines.index(heading) + 1
+    end = next((n for n in range(start, len(lines)) if lines[n].startswith("#")), len(lines))
+    return [line for line in lines[start:end] if line]
+
+
+CHECKS = [Check("DMARC", "flag", "strong", "dmarc=fail for paypa1.com", caveats=["c"]),
+          Check("DKIM", "inconclusive", "medium", "dkim=none"),
+          Check("SPF", "pass", "medium", "spf=pass"), Check("Script, file or app link", "pass", "medium", "ok")]
+
+
+def test_the_note_follows_the_guide():
+    report = report_of(CHECKS, found=Indicators(domains=["paypa1.com"]), message_id="<1@paypa1.com>",
+                       from_addr=Address("", "a@paypa1.com", "paypa1.com"), warnings=["w"],
+                       attachments=[Attachment("a.pdf", "application/pdf", 5, "f" * 64)])
+    note = render_markdown(report)
+    assert [line for line in note.splitlines() if line.startswith("#")] == [
+        "# Phishing triage: `s`", "## Summary", "## Signals", "## Inconclusive", "## Passed", "## Indicators",
+        "## Warnings about the tool's reading", "## Typical follow-ups if confirmed malicious", "## Analyst decision"]
+    assert note_section(note, "## Summary") == [
+        "Strongest flag: strong. Flagged: 1 strong. Inconclusive: 1. Passed: 2. Indicators: 1. Warnings: 1.",
+        "- From: `a[@]paypa1[.]com`",
+        "- Message-ID: `<1[@]paypa1[.]com>`",
+        "- Origin: unknown, no Received headers with an IP",
+        "- Links: 0. Attachments: 1",
+        "  - `a[.]pdf` (`application/pdf`, 5 bytes), SHA-256 `" + "f" * 64 + "`",
+    ]
+    assert note_section(note, "## Signals") == ["- **DMARC** (strong): `dmarc=fail for paypa1[.]com`",
+                                                "  - Caveat: `c`"]
+    assert note_section(note, "## Inconclusive") == ["- **DKIM** (medium): `dkim=none`"]
+    assert note_section(note, "## Passed") == ["SPF; Script, file or app link"]
+    assert note_section(note, "## Typical follow-ups if confirmed malicious")[2:4] == [
+        "  - Message-ID: `<1[@]paypa1[.]com>`", "  - Sender: `a[@]paypa1[.]com`"]
+    assert note_section(note, "## Analyst decision") == ["- Verdict:", "- Actions taken:"]
+
+
+def test_a_note_with_nothing_flagged_or_no_sender():
+    note = render_markdown(report_of([Check("SPF", "pass", "medium", "spf=pass")], from_addr=None))
+    assert note_section(note, "## Signals") == ["None."]
+    assert note_section(note, "## Inconclusive") == ["None."]
+    assert note_section(note, "## Summary")[1] == "- From: (missing)"
+    assert [line for line in note_section(note, "## Typical follow-ups if confirmed malicious")
+            if line.startswith("  -")] == []
+
+
+def test_a_missing_subject_or_file_name_isnt_shown_as_the_emails_text():
+    report = report_of(subject="", attachments=[Attachment("", "application/pdf", 5, "f" * 64)])
+    text, note = render_text(report), render_markdown(report)
+    assert text.splitlines()[0] == "Phishing triage: (no subject)"
+    assert section(text, "Email")[-1] == "    " + "f" * 64 + "  (no name) (application/pdf, 5 bytes)"
+    assert note.splitlines()[0] == "# Phishing triage: (no subject)"
+    assert note_section(note, "## Summary")[-1] == ("  - (no name) (`application/pdf`, 5 bytes), SHA-256 `"
+                                                    + "f" * 64 + "`")
+
+
+def test_text_in_the_note_cant_make_links_or_formatting():
+    note = render_markdown(report_of(subject="[x](http://evil.com) `y", message_id="`1@evil.com`"))
+    assert "http://" not in note and "@evil" not in note
+    assert note.splitlines()[0] == "# Phishing triage: ``[x](hxxp://evil[.]com) `y``"
+    assert "- Message-ID: `` `1[@]evil[.]com` ``" in note_section(note, "## Summary")
+
+
+def test_the_indicators_table():
+    found = Indicators(urls=["https://evil.com/p|q"], domains=["evil.com", "a.com"])
+    vt = Reputation("VirusTotal", LookupStatus.FOUND, "9 of 90 engines flagged it malicious")
+    over = Reputation("VirusTotal", LookupStatus.SKIPPED, "skipped, over the limit of 8 lookups a run",
+                      for_the_run=True)
+    assert note_section(render_markdown(build_text_report(found, {})), "## Indicators") == [
+        "| Type | Indicator, defanged |", "|---|---|",
+        "| URL | `hxxps://evil[.]com/p\\|q` |", "| Domain | `evil[.]com` |", "| Domain | `a[.]com` |"]
+    note = render_markdown(build_text_report(found, {"evil.com": [vt], "a.com": [over]}))
+    assert note_section(note, "## Indicators") == [
+        "| Type | Indicator, defanged | Reputation |", "|---|---|---|",
+        "| URL | `hxxps://evil[.]com/p\\|q` |  |",
+        "| Domain | `evil[.]com` | VirusTotal: `9 of 90 engines flagged it malicious` |",
+        "| Domain | `a[.]com` |  |",
+        "- Not looked up: VirusTotal: skipped, over the limit of 8 lookups a run (1 indicator, the one with no "
+        "VirusTotal result)"]
+
+
+def test_a_note_for_alert_text_has_no_email_sections():
+    note = render_markdown(build_text_report(Indicators(domains=["evil.com"]), {}))
+    assert [line for line in note.splitlines() if line.startswith("#")] == [
+        "# Phishing triage: alert text", "## Indicators", "## Analyst decision"]
+
+
+def test_the_json_holds_the_same_report():
+    looked_up = {"paypa1.com": [Reputation("VirusTotal", LookupStatus.FOUND, "3 of 90", {"malicious": 3})]}
+    report = report_of(CHECKS, found=Indicators(domains=["paypa1.com"]), results=looked_up,
+                       subject="Hi\x1b\N{RIGHT-TO-LEFT OVERRIDE}", origin=Origin("8.8.8.8", "x", "mx.example.net"))
+    text = render_json(report)
+    assert text.isascii()
+    data = json.loads(text)
+    assert data["format"] == 1
+    assert data["email"]["subject"] == "Hi\x1b\N{RIGHT-TO-LEFT OVERRIDE}"
+    assert data["origin"] == {"ip": "8.8.8.8", "name": "x", "received_by": "mx.example.net", "earliest_claim": None,
+                              "network": None}
+    assert data["summary"] == {"strongest_flag": "strong", "flagged": {"strong": 1, "medium": 0, "weak": 0},
+                               "inconclusive": 1, "passed": 2, "indicators": 1, "warnings": 0}
+    assert data["checks"][0] == {"name": "DMARC", "result": "flag", "strength": "strong",
+                                 "evidence": "dmarc=fail for paypa1.com", "caveats": ["c"]}
+    assert data["indicators"] == [{"type": "Domain", "value": "paypa1.com", "defanged": "paypa1[.]com",
+                                   "named_by": None, "lookups": [{"service": "VirusTotal", "status": "found",
+                                                                  "text": "3 of 90", "facts": {"malicious": 3}}]}]
+    assert data["analyst"] == {"verdict": None, "actions_taken": None}
+    assert len(data["follow_ups"]) == 3
+
+
+def test_json_for_alert_text():
+    data = json.loads(render_json(build_text_report(Indicators(domains=["evil.com"]), {})))
+    assert (data["email"], data["origin"], data["checks"], data["follow_ups"]) == (None, None, [], [])
+
+
+def test_the_short_summary():
+    over = Reputation("VirusTotal", LookupStatus.SKIPPED, "skipped, over the limit of 8 lookups a run",
+                      for_the_run=True)
+    report = report_of(CHECKS, found=Indicators(domains=["a.com"]), results={"a.com": [over]})
+    assert render_summary(report, ["note.md", "report.json"]).splitlines() == [
+        "Phishing triage: s",
+        "Strongest flag: strong",
+        "Flagged: 1 strong   Inconclusive: 1   Passed: 2   Indicators: 1",
+        "VirusTotal: skipped, over the limit of 8 lookups a run (1 indicator, the one with no VirusTotal result)",
+        "Wrote note.md and report.json",
+    ]
+    assert render_summary(build_text_report(Indicators(), {}), ["note.md"]).splitlines() == [
+        "Phishing triage: alert text", "Indicators: 0", "Wrote note.md"]

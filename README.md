@@ -27,12 +27,31 @@ Work in progress. What works now, with `python -m triage path/to/email.eml`:
 - Updating the tool's copy of the Public Suffix List with `python -m triage.update_suffixes`
 - A report in the terminal: a summary with the strongest flag and the count of each
   result, the email's details and origin, every check with flags first, and the indicators
+- A Markdown triage note to paste into a ticket with `--out note.md`, and the same report
+  as JSON for other tools with `--json report.json`. With either, the terminal shows a
+  short summary. `-` prints one instead of writing a file, for a pipe, and the summary
+  goes to stderr. There's a sample of each, from a synthetic email, in `samples/`.
+
+For example:
+
+```powershell
+# Real emails and alert text, and anything made from them, stay in data\, which git
+# ignores, since they hold personal data
+python -m triage data\reported.eml --out data\note.md --json data\report.json --enrich
+python -m triage --text data\alert.txt --enrich
+
+# The note on the clipboard, ready to paste. Windows PowerShell reads a program's output in
+# the console's old code page, which garbles letters like Cyrillic lookalikes, so set UTF-8
+# first.
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+python -m triage data\reported.eml --out - | Set-Clipboard
+```
 
 Planned:
 
-- A Markdown triage note and a JSON report, with findings sorted by strength
-
-The `--out` and `--json` options are there, but stop with "not built yet".
+- Named patterns that combine findings, and notes on what an email asks for (gift cards,
+  bank details, secrecy)
+- `--expect` for the brand the reporter says the email claims to be from
 
 ## Setting up the lookups
 
@@ -93,6 +112,25 @@ includes the company's root certificate.
   address out of sight, and quotes in the name are escaped, so a name like
   `PayPal" <service@paypal.com>` can't pass for the address. The same goes for text from
   the lookup services, like a network's name.
+
+- **The note is written for a ticket.** It follows the usual triage note: a summary, the
+  flags with their evidence, what was inconclusive or passed, the indicators, typical
+  follow-ups worded as suggestions, and blank fields for the analyst's verdict and actions,
+  which the tool never fills in. Every value from the email or a lookup is in a code span
+  and defanged, so it can't make a link, an image, or formatting, whether the ticket
+  system reads Markdown or not. That includes the Message-ID and addresses, which have to
+  be refanged before searching for them.
+
+- **The JSON keeps values exactly as found**, since a tool that blocks or searches needs
+  the real URL, with each indicator's defanged form next to it. It's plain ASCII: anything
+  else, control characters included, is written as an escape code, so no viewer can be
+  fooled by it. A `format` number says when a field is renamed or removed.
+
+- **Files are written whole or not at all.** Each goes to a file next to it first and is
+  then swapped in, with `\n` line endings on any system. If one can't be written, the full
+  report prints in the terminal instead, so a run that waited on lookups isn't lost. File
+  names are checked before the work starts, and a note can't be written over the email or
+  text it's about, since that's the evidence.
 
 - **Nothing in the email is opened.** Attachments are hashed in memory and never written
   to disk. HTML is read as text to pull out links, never rendered, so tracking pixels
