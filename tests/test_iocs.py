@@ -185,9 +185,9 @@ def test_email_indicators():
     assert from_email(parsed, Origin("203.0.113.5", "mail.paypa1.com", "mx.example.net")) == Indicators(
         # Links are written the way the browser reads them
         urls=["https://evil.com/a", "https://evil.com/@paypal.com", "http://www.evil.net/b", "http://216.58.214.4/p.gif"],
-        domains=["evil.com", "www.evil.net", "paypa1.com", "evil.org", "mailer.example"],
-        ips=["216.58.214.4", "203.0.113.5"],
-        emails=["help@evil.org", "service@paypa1.com", "x@evil.org", "bounce@mailer.example"],
+        domains=["paypa1.com", "evil.org", "mailer.example", "evil.com", "www.evil.net"],
+        ips=["203.0.113.5", "216.58.214.4"],
+        emails=["service@paypa1.com", "x@evil.org", "bounce@mailer.example", "help@evil.org"],
         hashes=[SHA256],
     )
 
@@ -208,7 +208,7 @@ def test_what_an_email_only_mentions_isnt_listed(fields):
 
 def test_domains_are_in_the_form_dns_uses():
     parsed = email(links=[Link("https://p\N{CYRILLIC SMALL LETTER A}ypal.com/", "")])
-    assert from_email(parsed, None).domains == ["xn--pypal-4ve.com", "paypa1.com"]
+    assert from_email(parsed, None).domains == ["paypa1.com", "xn--pypal-4ve.com"]
     # A dot at the end is the same domain
     parsed = ParsedEmail(from_addr=Address("", "a@evil.com.", "evil.com."), links=[Link("https://evil.com/", "")])
     assert from_email(parsed, None).domains == ["evil.com"]

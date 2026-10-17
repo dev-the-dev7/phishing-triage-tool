@@ -25,6 +25,8 @@ Work in progress. What works now, with `python -m triage path/to/email.eml`:
   AbuseIPDB for IPs, with each IP's network and country, and checks for domains
   registered in the last 30 days and for hops faked as Microsoft's servers
 - Updating the tool's copy of the Public Suffix List with `python -m triage.update_suffixes`
+- A report in the terminal: a summary with the strongest flag and the count of each
+  result, the email's details and origin, every check with flags first, and the indicators
 
 Planned:
 
@@ -75,6 +77,22 @@ includes the company's root certificate.
   pointer to a related check. The analyst should look at them whatever the result is. A
   caveat is never the reason for the result, which is what the evidence is for. When a
   check can't tell, the result is inconclusive, not a pass with a caveat.
+
+- **The report puts flags first, strongest first,** then inconclusive checks, then passes.
+  Its summary gives the strongest flag and the count of each result. The strongest flag
+  isn't a score: two weak flags don't add up to a medium one, since they can be the same
+  fact seen twice.
+
+- **Text from the email can't change how the report looks.** Control, invisible, and
+  line-breaking characters are shown as codes: terminal codes could rewrite lines above, a
+  newline or line separator in an encoded Subject could add a fake result line, and a
+  right-to-left override shows `invoice<RLO>fdp.exe` as `invoiceexe.pdf`. Long text is
+  cut in the middle, with how much was left out, since a Subject or display name can be
+  260 KB and the end often matters most (the reason at the end of a check's evidence). A
+  display name and its address are cut apart, so padding in the name can't push the
+  address out of sight, and quotes in the name are escaped, so a name like
+  `PayPal" <service@paypal.com>` can't pass for the address. The same goes for text from
+  the lookup services, like a network's name.
 
 - **Nothing in the email is opened.** Attachments are hashed in memory and never written
   to disk. HTML is read as text to pull out links, never rendered, so tracking pixels
@@ -253,6 +271,10 @@ includes the company's root certificate.
   `http://paypa1.com/`, and `http://3627734532/` as `http://216.58.214.4/`. Defanged, a
   Cyrillic `pаypal[.]com` looks just like the real one, and `xn--pypal-4ve[.]com` doesn't.
 
+- **The sender's domains and the origin are listed first**, since a long email can link to
+  a dozen domains before them. An IP a check flags, like a faked Microsoft hop's, is listed
+  too, even though the email didn't name it as one.
+
 ### Lookups
 
 - **Nothing goes online without `--enrich`, and nothing is uploaded with it.** Every
@@ -337,6 +359,11 @@ includes the company's root certificate.
   page answers for it, the rest of its lookups show as unavailable without being sent.
   Ctrl+C during a wait does the same for both services, so the indicators are still shown,
   and a second Ctrl+C stops the tool.
+
+- **With `--enrich`, the report prints once the lookups are done,** so the checks that need
+  them sort in with the rest. Waits are said on stderr as they happen. A lookup missed for
+  the whole run (over the limit, no key, or the service stopped) is said once, with how
+  many indicators it covered, instead of under each one.
 
 - **Found results are kept for a day** in your own cache folder
   (`%LOCALAPPDATA%\phishing-triage` on Windows), so running the tool again doesn't use up

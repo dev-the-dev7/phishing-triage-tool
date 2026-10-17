@@ -178,7 +178,7 @@ def check_microsoft_hops(origin: Origin | None, results: dict[str, list[Reputati
     # server wrote down its IP, and the IP's owner can't be faked
     name, strength = "Faked Microsoft hop", Strength.STRONG
     hops = origin.microsoft_hops if origin else []
-    faked, unknown, unknown_above = [], [], []
+    faked, faked_ips, unknown, unknown_above = [], [], [], []
     for position, server, ip in hops:
         result = next((r for r in results.get(ip, []) if r.service == "AbuseIPDB"), None)
         owner = result.facts.get("domain") if result else None
@@ -189,6 +189,7 @@ def check_microsoft_hops(origin: Origin | None, results: dict[str, list[Reputati
                 unknown_above = list(unknown)
             faked.append(f"Received header {position} calls itself {server}, but AbuseIPDB lists {ip} under "
                          f"{owner}: {result.text}")
+            faked_ips.append(ip)
         elif result is None:
             unknown.append(f"Received header {position} ({ip}): not looked up")
         elif result.status == LookupStatus.FOUND:
@@ -201,9 +202,10 @@ def check_microsoft_hops(origin: Origin | None, results: dict[str, list[Reputati
         if unknown_above:
             return Check(name, Result.FLAG, strength, f"{join_first_five(faked)}. The Origin line may be wrong",
                          [f"Who owns these isn't known, so Microsoft may have got the email from one of them "
-                          f"instead: {join_first_five(unknown_above)}"])
+                          f"instead: {join_first_five(unknown_above)}"], ips=faked_ips)
         return Check(name, Result.FLAG, strength, f"{join_first_five(faked)}. The first is the server Microsoft "
-                                                  "really got the email from, so the Origin line may be wrong")
+                                                  "really got the email from, so the Origin line may be wrong",
+                     ips=faked_ips)
     if unknown:
         return Check(name, Result.INCONCLUSIVE, strength, f"Who owns these isn't known: {join_first_five(unknown)}")
     if hops:
@@ -276,17 +278,19 @@ def _look_up_one(service: _Service, kind: str, value: str, cache: dict) -> Reput
     if cache_key in cache and _valid(service.name, cache[cache_key]["facts"]):
         return _found(service.name, cache[cache_key]["facts"])
     if not service.key:
-        return Reputation(service.name, LookupStatus.UNAVAILABLE, f"unavailable, {service.key_variable} isn't set")
+        return Reputation(service.name, LookupStatus.UNAVAILABLE, f"unavailable, {service.key_variable} isn't set",
+                          for_the_run=True)
     if service.stopped:
-        return Reputation(service.name, LookupStatus.UNAVAILABLE, f"unavailable, {service.stopped}")
+        return Reputation(service.name, LookupStatus.UNAVAILABLE, f"unavailable, {service.stopped}", for_the_run=True)
     if len(service.sent) >= service.most:
-        return Reputation(service.name, LookupStatus.SKIPPED, f"skipped, over the limit of {service.most} lookups a run")
+        return Reputation(service.name, LookupStatus.SKIPPED,
+                          f"skipped, over the limit of {service.most} lookups a run", for_the_run=True)
     try:
         facts = _ask(service, kind, value)
     except _NoAnswer as e:
         if e.stop:
             service.stopped = str(e)
-        return Reputation(service.name, LookupStatus.UNAVAILABLE, f"unavailable, {e}")
+        return Reputation(service.name, LookupStatus.UNAVAILABLE, f"unavailable, {e}", for_the_run=e.stop)
     if facts is None:
         return Reputation(service.name, LookupStatus.NOT_FOUND, "not found (unknown, not clean)")
     if service.name != "VirusTotal" or _engines(facts):
@@ -506,9 +510,13 @@ def _describe_abuseipdb(facts: dict) -> str:
     # Its trusted list is why Google's DNS server has hundreds of reports and 0% confidence
     if facts["trusted"]:
         text += " (on its trusted list)"
+    where = network(facts)
+    return f"{text}, {where}" if where else text
+
+
+def network(facts: dict) -> str:
     # Context, not a check: where the IP is, by AbuseIPDB's records, not where the sender is
-    network = facts["isp"] + (f" in {facts['country']}" if facts["country"] else "")
-    return f"{text}, {network.strip()}" if network else text
+    return (facts["isp"] + (f" in {facts['country']}" if facts["country"] else "")).strip()
 
 
 def _count(number: int, word: str) -> str:

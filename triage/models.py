@@ -51,6 +51,7 @@ class Check:
     # never why the check got its result: when it can't tell, it's inconclusive.
     caveats: list[str] = field(default_factory=list)
     domains: list[str] = field(default_factory=list)  # the domains a flag is about, looked up first
+    ips: list[str] = field(default_factory=list)  # IPs a flag is about that the email didn't list
 
     def __post_init__(self):
         # Turns "flag" into Result.FLAG, and raises ValueError on a typo like "fail"
@@ -125,3 +126,6 @@ class Reputation:
     status: LookupStatus
     text: str  # what was found, or why nothing was, in plain words
     facts: dict = field(default_factory=dict)  # what a found result is written from
+    # True when it's about the run, not the indicator (over the limit, no key, the service
+    # stopped), so the report says it once
+    for_the_run: bool = False

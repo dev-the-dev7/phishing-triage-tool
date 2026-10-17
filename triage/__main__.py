@@ -3,21 +3,19 @@
 import argparse
 import codecs
 import sys
-import unicodedata
 from datetime import date
 
 from .checks import run_checks
-from .domains import SUFFIX_LIST_DATE, base_domain
+from .domains import SUFFIX_LIST_DATE
 from .enrich import check_domain_age, check_microsoft_hops, look_up
-from .iocs import defang, from_email, from_text
-from .models import Check, Indicators, Reputation, Result
+from .iocs import from_email, from_text
+from .models import Indicators, Result
 from .parser import parse_file
 from .received import find_origin, received_warnings
+from .report import build_report, build_text_report, render_text
 
 # Alert text is short. This stops a log file passed by mistake from filling memory.
 MAX_TEXT_BYTES = 10 * 1024 * 1024
-
-HASH_NAMES = {32: "MD5", 40: "SHA-1", 64: "SHA-256"}
 
 # The Public Suffix List copy only changes when it's updated by hand, so the tool says when
 # it's older than this
@@ -54,13 +52,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _print_escaped(text: str) -> None:
-    # Terminal escape codes and invisible characters are printed as visible codes, since a
-    # right-to-left override shows invoice<RLO>fdp.exe as invoiceexe.pdf
-    shown = (ascii(ch)[1:-1] if unicodedata.category(ch) in ("Cc", "Cf") else ch for ch in text)
-    print("".join(shown))
-
-
 def _read_text(name: str) -> str:
     # One byte past the limit shows it's too big
     if name == "-":
@@ -77,25 +68,11 @@ def _read_text(name: str) -> str:
     return data.decode("utf-8-sig", errors="replace")
 
 
-def _print_indicators(found: Indicators, reputation: dict[str, list[Reputation]]) -> None:
-    # Defanged, so pasting them into a ticket or a chat doesn't make live links
-    rows = ([("URL", url) for url in found.urls] + [("Domain", domain) for domain in found.domains]
-            + [("IP", ip) for ip in found.ips] + [("Email", email) for email in found.emails]
-            + [(HASH_NAMES[len(sha)], sha) for sha in found.hashes])
-    if not rows:
-        print("Indicators:  none found")
-        return
-    print("Indicators, defanged:")
-    for kind, value in rows:
-        _print_escaped(f"  {kind:<8} {defang(value)}")
-        for result in reputation.get(value, []):
-            _print_escaped(f"{'':<11}{result.service}: {result.text}")
-
-
-def _print_check(check: Check) -> None:
-    _print_escaped(f"  {check.result.upper():<12} {check.strength:<7} {check.name}: {check.evidence}")
-    for caveat in check.caveats:
-        _print_escaped(f"{'':<23}Caveat: {caveat}")
+def _say_looking_up(found: Indicators) -> None:
+    # On stderr, since the report waits for the lookups and they can take a minute or two
+    count = len(found.urls) + len(found.domains) + len(found.ips) + len(found.hashes)
+    if count:
+        print(f"Looking up {count} {'indicator' if count == 1 else 'indicators'}...", file=sys.stderr)
 
 
 def _note_old_suffix_list() -> None:
@@ -136,7 +113,11 @@ def _run(args: argparse.Namespace) -> int:
             print(f"error: {e}", file=sys.stderr)
             return 1
         found = from_text(text)
-        _print_indicators(found, look_up(found) if args.enrich else {})
+        results = {}
+        if args.enrich:
+            _say_looking_up(found)
+            results = look_up(found)
+        print(render_text(build_text_report(found, results)), end="")
         _note_old_suffix_list()
         return 0
 
@@ -146,41 +127,18 @@ def _run(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
 
-    # Temporary summary until the report module exists
-    sender = parsed.from_addr.email if parsed.from_addr else "(missing)"
-    _print_escaped(f"From:        {sender}")
-    _print_escaped(f"Subject:     {parsed.subject}")
-    _print_escaped(f"Links:       {len(parsed.links)}")
-    _print_escaped(f"Attachments: {len(parsed.attachments)}")
-    for a in parsed.attachments:
-        _print_escaped(f"  {a.sha256}  {a.filename} ({a.content_type}, {a.size} bytes)")
     origin = find_origin(parsed)
-    if origin is None:
-        _print_escaped("Origin:      unknown, no Received headers with an IP")
-    elif origin.ip is None:
-        _print_escaped(f"Origin:      none outside {base_domain(origin.received_by)}, every hop is inside the provider")
-    else:
-        claim = f", lower hops claim {origin.earliest_claim} (could be forged)" if origin.earliest_claim else ""
-        _print_escaped(f"Origin:      {origin.ip} ({origin.name}) handed it to {origin.received_by}{claim}")
-    for w in parsed.parse_warnings + received_warnings(parsed):
-        _print_escaped(f"Warning:     {w}")
-
-    print()
     checks = run_checks(parsed)
-    for check in checks:
-        _print_check(check)
-    print()
     found = from_email(parsed, origin)
+    results = {}
     if args.enrich:
+        _say_looking_up(found)
         # Lookalike domains are looked up first, and these checks need the lookups' results
         flagged = [domain for check in checks if check.result == Result.FLAG for domain in check.domains]
         results = look_up(found, parsed.attachments, flagged, origin)
-        _print_indicators(found, results)
-        print()
-        _print_check(check_domain_age(found, results))
-        _print_check(check_microsoft_hops(origin, results))
-    else:
-        _print_indicators(found, {})
+        checks += [check_domain_age(found, results), check_microsoft_hops(origin, results)]
+    warnings = parsed.parse_warnings + received_warnings(parsed)
+    print(render_text(build_report(parsed, origin, checks, found, results, warnings)), end="")
     _note_old_suffix_list()
     return 0
 

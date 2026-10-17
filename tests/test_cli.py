@@ -39,6 +39,13 @@ def results(out: str) -> dict[str, str]:
                 re.findall(r"^  (FLAG|PASS|INCONCLUSIVE) +\w+ +([^:]+):", out, re.M))
 
 
+def section(out: str, heading: str) -> list[str]:
+    # The lines under a heading, up to the blank line after them
+    lines = out.splitlines() + [""]
+    start = lines.index(heading) + 1
+    return lines[start:lines.index("", start)]
+
+
 def write_email(tmp_path, text: str) -> Path:
     path = tmp_path / "email.eml"
     path.write_bytes(text.encode())
@@ -55,29 +62,35 @@ def test_clean_email_passes_every_check(capsys):
 def test_suspicious_email(capsys):
     code, out, _ = run(capsys, FIXTURES / "suspicious.eml")
     assert code == 0
-    summary, checks, indicators = out.split("\n\n")
-    assert summary.splitlines() == [
-        "From:        security@paypa1.com",
-        "Subject:     Action required: your account has been limited",
-        # Two in the HTML, and the same two written out in the plain text part
-        "Links:       4",
-        "Attachments: 1",
-        "  043ea8960dc71f654cf0ac9ac501c16d09eed7b0e1528532fe25f122f1cc4f35  "
-        "Account_Statement.pdf (application/pdf, 60 bytes)",
-        "Origin:      203.0.113.45 (mail.paypa1.com) handed it to mx.example.net, "
-        "lower hops claim 198.51.100.23 (could be forged)",
+    assert out.splitlines()[0] == "Phishing triage: Action required: your account has been limited"
+    assert section(out, "Summary") == [
+        "  Strongest flag: strong",
+        "  Flagged: 4 strong, 1 medium   Inconclusive: 1   Passed: 5   Indicators: 11",
     ]
-    flagged = {name for name, result in results(checks).items() if result == "FLAG"}
+    assert section(out, "Email") == [
+        '  From:        "PayPal Security" <security@paypa1.com>',
+        '  To:          "Jordan Lee" <jordan.lee@example.net>',
+        "  Reply-To:    case-review@account-resolution.example",
+        "  Return-Path: bounce@paypa1.com",
+        "  Date:        Mon, 05 Oct 2026 16:14:18 +0000",
+        "  Message-ID:  <20261005161418.4417@paypa1.com>",
+        "  Origin:      203.0.113.45 (mail.paypa1.com) handed it to mx.example.net",
+        "               lower hops claim 198.51.100.23 (could be forged)",
+        # Two in the HTML, and the same two written out in the plain text part
+        "  Links: 4   Attachments: 1",
+        "    043ea8960dc71f654cf0ac9ac501c16d09eed7b0e1528532fe25f122f1cc4f35  "
+        "Account_Statement.pdf (application/pdf, 60 bytes)",
+    ]
+    flagged = {name for name, result in results(out).items() if result == "FLAG"}
     assert flagged == {"DMARC", "Reply-To", "Display name", "Lookalike domain", "Link text vs destination"}
     # The tracking image is listed too, and www.paypal.com, which a link only shows, isn't
-    assert indicators.splitlines() == [
-        "Indicators, defanged:",
+    assert section(out, "Indicators, defanged") == [
         "  URL      hxxp://paypa1[.]com/login/verify?case=88213",
         "  URL      hxxps://bit[.]ly/3pPx9Qz",
         "  URL      hxxp://203[.]0[.]113[.]45/t[.]gif?u=jordan[.]lee",
         "  Domain   paypa1[.]com",
-        "  Domain   bit[.]ly",
         "  Domain   account-resolution[.]example",
+        "  Domain   bit[.]ly",
         "  IP       203[.]0[.]113[.]45",
         "  Email    security[@]paypa1[.]com",
         "  Email    case-review[@]account-resolution[.]example",
@@ -110,7 +123,7 @@ def test_text_from_the_email_is_printed_escaped(capsys, tmp_path):
     code, out, _ = run(capsys, path)
     assert code == 0
     assert "\x1b" not in out and "\N{RIGHT-TO-LEFT OVERRIDE}" not in out
-    assert r"Subject:     Invoice\x1b[1A\x1b[2K paid" in out
+    assert r"Phishing triage: Invoice\x1b[1A\x1b[2K paid" in out
     assert "invoice\\u202efdp.exe" in out
 
 
@@ -126,7 +139,7 @@ def test_caveats_are_printed_under_their_check(capsys, tmp_path):
                                "where CSS could change what the reader sees. Check what the link looks like in a "
                                "mail client, without clicking it.")
     # The line after is the next check
-    assert lines[flag + 2].startswith("  PASS         medium  Script, file or app link: ")
+    assert re.match(r"  (FLAG|INCONCLUSIVE|PASS) ", lines[flag + 2])
 
 
 def test_warnings_are_printed_escaped(capsys, tmp_path):
@@ -159,7 +172,7 @@ def test_email_without_a_from_is_still_checked(capsys, tmp_path):
     code, out, _ = run(capsys, write_email(tmp_path, "To: someone@example.net\r\nSubject: s\r\n\r\nHello"))
     assert code == 0
     assert "From:        (missing)\n" in out
-    assert list(results(out)) == CHECK_NAMES
+    assert sorted(results(out)) == sorted(CHECK_NAMES)
 
 
 def test_output_that_cant_be_reconfigured():
@@ -167,7 +180,7 @@ def test_output_that_cant_be_reconfigured():
     output = io.StringIO()
     with contextlib.redirect_stdout(output):
         assert main([str(FIXTURES / "clean.eml")]) == 0
-    assert list(results(output.getvalue())) == CHECK_NAMES
+    assert sorted(results(output.getvalue())) == sorted(CHECK_NAMES)
 
 
 def run_module(*args, **kwargs) -> subprocess.CompletedProcess:
@@ -190,7 +203,7 @@ def test_output_in_an_encoding_without_emoji(tmp_path):
                                  "Subject: =?utf-8?q?Prize_=F0=9F=8E=81?=\r\n\r\nHello")
     process = run_module(path, env={**os.environ, "PYTHONIOENCODING": "ascii"})
     assert process.returncode == 0
-    assert "Subject:     Prize \N{WRAPPED PRESENT}" in process.stdout.decode("utf-8")
+    assert "Phishing triage: Prize \N{WRAPPED PRESENT}" in process.stdout.decode("utf-8")
 
 
 @pytest.mark.parametrize("args, flags", [
@@ -219,7 +232,8 @@ def write_text(tmp_path, data: bytes) -> Path:
 
 
 ALERT = "Blocked hxxps://evil[.]com/login from 198.51.100.7, sent by x[@]evil[.]com"
-ALERT_INDICATORS = ("Indicators, defanged:\n"
+ALERT_INDICATORS = ("Phishing triage: alert text\n\n"
+                    "Indicators, defanged\n"
                     "  URL      hxxps://evil[.]com/login\n"
                     "  Domain   evil[.]com\n"
                     "  IP       198[.]51[.]100[.]7\n"
@@ -253,13 +267,16 @@ def test_nothing_is_looked_up_without_enrich(capsys, tmp_path, monkeypatch):
 
 
 def test_enrich_without_keys_still_runs(capsys):
-    # Each lookup says why there's no result, and nothing is sent. The origin IP is reserved
-    # for documentation, so it wouldn't be sent anyway.
-    code, out, _ = run(capsys, FIXTURES / "suspicious.eml", "--enrich")
+    # Every missed lookup says why, and nothing is sent. The origin IP is reserved for
+    # documentation, so it wouldn't be sent anyway.
+    code, out, err = run(capsys, FIXTURES / "suspicious.eml", "--enrich")
     assert code == 0
-    indicators = out.split("\n\n")[2].splitlines()
-    unset = " " * 11 + "VirusTotal: unavailable, VT_API_KEY isn't set"
-    assert indicators[indicators.index("  Domain   bit[.]ly") + 1] == unset
+    assert err == "Looking up 8 indicators...\n"
+    indicators = section(out, "Indicators, defanged")
+    # Said once for the run, not under each indicator
+    assert indicators[-1] == ("  VirusTotal: unavailable, VT_API_KEY isn't set (5 indicators, the ones with no "
+                              "VirusTotal line)")
+    assert indicators[indicators.index("  Domain   bit[.]ly") + 1] == "  IP       203[.]0[.]113[.]45"
     assert indicators[indicators.index("  IP       203[.]0[.]113[.]45") + 1:][:2] == [
         " " * 11 + "AbuseIPDB: skipped, private or reserved address",
         " " * 11 + "VirusTotal: skipped, private or reserved address",
@@ -290,7 +307,8 @@ def test_enrich_results_go_under_each_indicator(capsys, tmp_path, monkeypatch):
     alert = "Blocked hxxps://evil[.]com/login from 8.8.8.8, sent by x[@]evil[.]com"
     code, out, _ = run(capsys, "--text", write_text(tmp_path, alert.encode()), "--enrich")
     assert code == 0
-    assert out == ("Indicators, defanged:\n"
+    assert out == ("Phishing triage: alert text\n\n"
+                   "Indicators, defanged\n"
                    "  URL      hxxps://evil[.]com/login\n"
                    "           VirusTotal: not found (unknown, not clean)\n"
                    "  Domain   evil[.]com\n"
@@ -317,19 +335,18 @@ def test_enrich_is_given_the_attachments(capsys, tmp_path, monkeypatch):
 
 
 def test_enrich_checks_how_new_the_domains_are(capsys, monkeypatch):
-    # The lookalike check's domain is looked up first, and the age check prints after the lookups
+    # The lookalike check's domain is looked up first
     given = []
     monkeypatch.setattr(cli, "look_up", lambda found, attachments=None, flagged=None, origin=None:
                         given.append(flagged) or {})
     _, out, _ = run(capsys, FIXTURES / "suspicious.eml", "--enrich")
     assert given == [["paypa1.com"]]
-    assert out.splitlines()[-2] == ("  INCONCLUSIVE medium  Newly registered domain: No registration date for "
-                                    "paypa1.com; bit.ly")
+    assert ("  INCONCLUSIVE medium  Newly registered domain: No registration date for paypa1.com; "
+            "bit.ly") in section(out, "Findings")
     assert "Newly registered domain" not in run(capsys, FIXTURES / "suspicious.eml")[1]
 
 
 def test_enrich_checks_who_owns_hops_named_as_microsofts(capsys, tmp_path, monkeypatch):
-    # The hop's IP isn't an indicator, so its owner only shows in the check
     owner = Reputation("AbuseIPDB", LookupStatus.FOUND, "no reports in the last 90 days, DigitalOcean, LLC in US",
                        {"domain": "digitalocean.com"})
     monkeypatch.setattr(cli, "look_up", lambda found, attachments=None, flagged=None, origin=None:
@@ -338,11 +355,14 @@ def test_enrich_checks_who_owns_hops_named_as_microsofts(capsys, tmp_path, monke
         "Received: from x.prod.outlook.com (203.0.113.9) by SN6PR02.prod.outlook.com;\r\n"
         " Tue, 6 Oct 2026 10:00:00 +0000\r\nFrom: a@example.org\r\nSubject: s\r\n\r\nHello"))
     _, out, _ = run(capsys, path, "--enrich")
-    assert "203[.]0[.]113[.]9" not in out
-    assert out.splitlines()[-1] == (
+    assert section(out, "Findings")[0] == (
         "  FLAG         strong  Faked Microsoft hop: Received header 1 calls itself x.prod.outlook.com, but AbuseIPDB "
         "lists 203.0.113.9 under digitalocean.com: no reports in the last 90 days, DigitalOcean, LLC in US. The first "
         "is the server Microsoft really got the email from, so the Origin line may be wrong")
+    # The email didn't list the hop's IP, but it's likely the sender's server, so it's an indicator
+    indicators = section(out, "Indicators, defanged")
+    row = indicators.index("  IP       203[.]0[.]113[.]9 (from the Faked Microsoft hop check)")
+    assert indicators[row + 1] == " " * 11 + "AbuseIPDB: no reports in the last 90 days, DigitalOcean, LLC in US"
     assert "Faked Microsoft hop" not in run(capsys, path)[1]
 
 
@@ -353,12 +373,14 @@ def test_a_second_ctrl_c_stops_without_a_traceback(capsys, tmp_path, monkeypatch
 
     monkeypatch.setattr(enrich, "_look_up_one", ctrl_c)
     code, _, err = run(capsys, "--text", write_text(tmp_path, ALERT.encode()), "--enrich")
-    assert (code, err) == (130, "Stopped\n")
+    assert (code, err) == (130, "Looking up 3 indicators...\nStopped\n")
 
 
 def test_alert_text_without_indicators(capsys, tmp_path):
-    _, out, _ = run(capsys, "--text", write_text(tmp_path, b"Nothing to see"))
-    assert out == "Indicators:  none found\n"
+    _, out, err = run(capsys, "--text", write_text(tmp_path, b"Nothing to see"), "--enrich")
+    assert out == "Phishing triage: alert text\n\nIndicators, defanged\n  none found\n"
+    # Nothing to wait for, so nothing to say
+    assert err == ""
 
 
 def test_indicators_are_printed_escaped(capsys, tmp_path):

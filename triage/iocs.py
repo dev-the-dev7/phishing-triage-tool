@@ -40,6 +40,13 @@ def from_email(parsed: ParsedEmail, origin: Origin | None) -> Indicators:
     # What the email links to, loads and came from. Domains only mentioned in the text aren't
     # listed, since phishing names the real brand to look genuine, and neither is a link's text.
     urls, hosts, emails = [], [], []
+    # The sender's first, so a long list of link domains can't push them down
+    for address in [parsed.from_addr, *parsed.reply_to, parsed.return_path]:
+        if address:
+            emails.append(address.email)
+            hosts.append(address.domain)
+    if origin and origin.ip:
+        hosts.append(origin.ip)
     for href in [link.href for link in parsed.links] + parsed.other_urls:
         host = url_host(href)
         if host:
@@ -47,12 +54,6 @@ def from_email(parsed: ParsedEmail, origin: Origin | None) -> Indicators:
             hosts.append(host)
         elif re.match("mailto:", href, re.I):
             emails += EMAIL.findall(unquote(href))
-    for address in [parsed.from_addr, *parsed.reply_to, parsed.return_path]:
-        if address:
-            emails.append(address.email)
-            hosts.append(address.domain)
-    if origin and origin.ip:
-        hosts.append(origin.ip)
     return _indicators(urls, hosts, emails, [attachment.sha256 for attachment in parsed.attachments])
 
 

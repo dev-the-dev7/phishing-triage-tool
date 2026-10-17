@@ -1,4 +1,4 @@
-"""Runs every check on a parsed email. The report gets its list from here."""
+"""Runs every check that needs only the email. The two that need the lookups are in enrich.py."""
 
 from .content import check_css_added_text, check_hidden_text, check_image_only
 from .headers import check_authentication, check_free_email, check_reply_to, check_return_path
