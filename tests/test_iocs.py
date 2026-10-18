@@ -50,6 +50,8 @@ def test_defang(real, defanged):
     ("text shows www.paypal.com but goes to paypa1.com.", "text shows www[.]paypal[.]com but goes to paypa1[.]com."),
     ("Sign in at https://evil.com/a. Then", "Sign in at hxxps://evil[.]com/a. Then"),
     ("from first.last@evil.com", "from first[.]last[@]evil[.]com"),
+    # Plain text ticket systems link these too
+    ("=?utf-8?q?x?=@evil.com and o'brien@evil.com", "=?utf-8?q?x?=[@]evil[.]com and o'brien[@]evil[.]com"),
     ("It passed. Next... done", "It passed. Next... done"),
 ])
 def test_defang_text(text, defanged):
@@ -178,11 +180,12 @@ def test_endings_that_arent_tlds_arent_domains(text):
 
 
 def email(**fields) -> ParsedEmail:
-    return ParsedEmail(from_addr=Address("PayPal", "service@paypa1.com", "paypa1.com"), **fields)
+    return ParsedEmail(**{"from_addrs": [Address("PayPal", "service@paypa1.com", "paypa1.com")], **fields})
 
 
 def test_email_indicators():
     parsed = email(
+        from_addrs=[Address("PayPal", "service@paypa1.com", "paypa1.com"), Address("", "x@evil.net", "evil.net")],
         reply_to=[Address("", "x@evil.org", "evil.org")],
         return_path=Address("", "bounce@mailer.example", "mailer.example"),
         links=[Link("https://evil.com/a", "paypal.com"), Link("mailto:help@evil.org?subject=Hi", "Help"),
@@ -195,9 +198,9 @@ def test_email_indicators():
     assert from_email(parsed, Origin("203.0.113.5", "mail.paypa1.com", "mx.example.net")) == Indicators(
         # Links are written the way the browser reads them
         urls=["https://evil.com/a", "https://evil.com/@paypal.com", "http://www.evil.net/b", "http://216.58.214.4/p.gif"],
-        domains=["paypa1.com", "evil.org", "mailer.example", "evil.com", "www.evil.net"],
+        domains=["paypa1.com", "evil.net", "evil.org", "mailer.example", "evil.com", "www.evil.net"],
         ips=["203.0.113.5", "216.58.214.4"],
-        emails=["service@paypa1.com", "x@evil.org", "bounce@mailer.example", "help@evil.org"],
+        emails=["service@paypa1.com", "x@evil.net", "x@evil.org", "bounce@mailer.example", "help@evil.org"],
         hashes=[SHA256],
     )
 
@@ -220,7 +223,7 @@ def test_domains_are_in_the_form_dns_uses():
     parsed = email(links=[Link("https://p\N{CYRILLIC SMALL LETTER A}ypal.com/", "")])
     assert from_email(parsed, None).domains == ["paypa1.com", "xn--pypal-4ve.com"]
     # A dot at the end is the same domain
-    parsed = ParsedEmail(from_addr=Address("", "a@evil.com.", "evil.com."), links=[Link("https://evil.com/", "")])
+    parsed = ParsedEmail(from_addrs=[Address("", "a@evil.com.", "evil.com.")], links=[Link("https://evil.com/", "")])
     assert from_email(parsed, None).domains == ["evil.com"]
 
 
@@ -229,5 +232,5 @@ def test_origin_inside_the_provider_has_no_ip():
 
 
 def test_sender_without_a_domain():
-    parsed = ParsedEmail(from_addr=Address("", "undisclosed", ""))
+    parsed = ParsedEmail(from_addrs=[Address("", "undisclosed", "")])
     assert from_email(parsed, None) == Indicators(emails=["undisclosed"])

@@ -21,8 +21,8 @@ from triage.__main__ import main
 from triage.models import LookupStatus, Reputation
 
 FIXTURES = Path(__file__).parent / "fixtures"
-# Hidden text, Image only and Text added by CSS are left out, since they're only listed when
-# they find something
+# Ambiguous From, Hidden text, Image only and Text added by CSS are left out, since they're
+# only listed when they find something
 CHECK_NAMES = ["SPF", "DKIM", "DMARC", "Reply-To", "Return-Path domain", "Display name", "Free webmail sender",
                "Lookalike domain", "Brand joined to a word", "Link text vs destination", "Script, file or app link"]
 
@@ -142,11 +142,17 @@ def test_caveats_are_printed_under_their_check(capsys, tmp_path):
     assert re.match(r"  (FLAG|INCONCLUSIVE|PASS) ", lines[flag + 2])
 
 
+def test_a_from_that_reads_two_ways_is_flagged(capsys, tmp_path):
+    path = write_email(tmp_path, "From: service@paypal.com\r\nFrom: x@evil.com\r\nSubject: s\r\n\r\nHello")
+    _, out, _ = run(capsys, path)
+    assert results(out)["Ambiguous From"] == "FLAG"
+
+
 def test_warnings_are_printed_escaped(capsys, tmp_path):
     # Warnings can repeat text from the email. The Mailsploit attacks hid a null byte in an
     # encoded address, and some clients stopped reading there and showed only service@paypal.com.
     path = write_email(tmp_path, (
-        "From: =?utf-8?q?service=40paypal=2Ecom=00?=@evil.com\r\nTo: someone@example.net\r\n"
+        "From: a@example.org\r\nTo: =?utf-8?q?service=40paypal=2Ecom=00?=@evil.com\r\n"
         "Subject: s\r\n\r\nHello"
     ))
     code, out, _ = run(capsys, path)

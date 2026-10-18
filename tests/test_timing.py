@@ -6,7 +6,7 @@ import time
 import pytest
 
 from triage.checks import run_checks
-from triage.headers import check_authentication
+from triage.headers import check_dkim, check_dmarc, check_spf
 from triage.impersonation import check_brand_joined, check_lookalike
 from triage.iocs import from_email, from_text
 from triage.link_wrappers import destinations, unwrap
@@ -40,7 +40,7 @@ def test_many_dashes_in_a_link_host():
 @pytest.mark.parametrize("unit", ["(", "(a", '"', '"\\', '\\"', '"('])
 def test_unclosed_comments_and_quotes_in_authentication_results(unit):
     parsed = ParsedEmail(auth_results=["mx.example.org; dkim=pass " + unit * 20_000])
-    assert seconds(lambda: check_authentication(parsed)) < 1
+    assert seconds(lambda: (check_spf(parsed), check_dkim(parsed), check_dmarc(parsed))) < 1
 
 
 def test_many_bases_and_links():
@@ -48,6 +48,13 @@ def test_many_bases_and_links():
     html = "".join(f'<base href="https://b{i}.example/">' for i in range(500)) + '<a href="/x">x</a>' * 500
     raw = ("From: a@example.org\r\nContent-Type: text/html\r\n\r\n" + html).encode()
     assert seconds(lambda: run_checks(parse_bytes(raw))) < 1
+
+
+def test_many_from_and_reply_to_addresses():
+    # The Reply-To check compares each From with every Reply-To
+    addresses = ", ".join(f"a{i}@e{i}.example" for i in range(1_000))
+    parsed = parse_bytes(f"From: {addresses}\r\nReply-To: {addresses}\r\n\r\nx".encode())
+    assert seconds(lambda: run_checks(parsed)) < 1
 
 
 def test_thousands_of_open_elements():

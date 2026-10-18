@@ -6,7 +6,7 @@ import re
 from .domains import (base_domain, decode_idn, is_ip, lookalike_forms, normalize_unicode,
                       registered_name, url_host)
 from .lists import BRANDS, EXECUTIVES, FREE_EMAIL_DOMAINS, OWN_DOMAINS, OWN_NAMES
-from .models import Check, ParsedEmail, Result, Strength, join_first_five
+from .models import Address, Check, ParsedEmail, Result, Strength, for_each_from, join_first_five
 
 # Shorter brand names are one letter from common words (apple/apply) and sit inside others
 # (pineapple), so they skip the joined check and are only typo-checked on the registered
@@ -19,16 +19,20 @@ MIN_TYPO_LENGTH = 5
 
 
 def check_display_name(parsed: ParsedEmail) -> Check:
+    return for_each_from(parsed.from_addrs, _check_display_name)
+
+
+def _check_display_name(from_addr: Address | None) -> Check:
     name, strength = "Display name", Strength.MEDIUM
-    if not parsed.from_addr:
+    if not from_addr:
         return Check(name, Result.INCONCLUSIVE, strength, "No readable From address")
-    if not parsed.from_addr.display_name:
+    if not from_addr.display_name:
         return Check(name, Result.PASS, strength, "No display name")
 
-    display = parsed.from_addr.display_name
+    display = from_addr.display_name
     # The whole address when there's no domain to show (From: "PayPal" <support>)
-    domain = parsed.from_addr.domain or parsed.from_addr.email
-    base = base_domain(parsed.from_addr.domain)
+    domain = from_addr.domain or from_addr.email
+    base = base_domain(from_addr.domain)
     display_forms = lookalike_forms(display)
     hits = []
 
@@ -161,8 +165,8 @@ def _unlisted_domains(parsed: ParsedEmail) -> list[tuple[str, str, str]]:
     # Sender and link domains that aren't a target's or free webmail, as (label, domain as
     # displayed, base domain). Links matter, since mail from a hacked account has a normal sender.
     found_in = {}
-    for a in [parsed.from_addr, *parsed.reply_to]:
-        if a and a.domain:
+    for a in [*parsed.from_addrs, *parsed.reply_to]:
+        if a.domain:
             found_in.setdefault(a.domain, set()).add("sender")
     for link in parsed.links:
         link_host = url_host(link.href)

@@ -82,7 +82,7 @@ def test_long_date_only_warns():
     parsed = parse("From: a@example.org", "Date: <" + "a" * 5_000 + "@example.org>")
     assert parsed.parse_warnings == ["Date header couldn't be parsed (ValueError)"]
     assert parsed.date == ""
-    assert parsed.from_addr.email == "a@example.org"
+    assert parsed.from_addrs[0].email == "a@example.org"
 
 
 @pytest.mark.parametrize("message_id", [
@@ -170,8 +170,8 @@ def test_subject_decoding(subject, expected):
 
 
 # Encoded text isn't allowed in an address, but some mail clients decode it anyway (the
-# Mailsploit bugs) and show an address that isn't the real one. It's read as written,
-# with a warning showing what those clients display.
+# Mailsploit bugs) and show an address that isn't the real one. It's read as written, and
+# what those clients show is kept for the checks.
 
 @pytest.mark.parametrize("from_value, domain, shown", [
     ("service@=?utf-8?q?paypal=2Ecom?=", "=?utf-8?q?paypal=2ecom?=", "service@paypal.com"),
@@ -180,14 +180,22 @@ def test_subject_decoding(subject, expected):
 ])
 def test_encoded_text_in_an_address_is_read_as_written(from_value, domain, shown):
     parsed = parse(f"From: {from_value}")
-    assert parsed.from_addr.domain == domain
-    assert any(f"Some mail clients decode it and show {shown}" in w for w in parsed.parse_warnings)
+    assert parsed.from_addrs[0].domain == domain
+    assert parsed.from_addrs[0].decoded == shown
 
 
-def test_address_with_encoded_word_characters_has_no_warning():
+def test_address_with_encoded_word_characters_isnt_decoded():
     parsed = parse("From: a=?b@example.com")
-    assert parsed.from_addr.email == "a=?b@example.com"
-    assert parsed.parse_warnings == []
+    assert parsed.from_addrs[0].email == "a=?b@example.com"
+    assert parsed.from_addrs[0].decoded == ""
+
+
+@pytest.mark.parametrize("header", ["To", "Return-Path"])
+def test_encoded_text_where_no_check_reads_it_warns(header):
+    raw = f"From: a@example.org\r\n{header}: =?utf-8?q?service=40paypal=2Ecom?=@evil.com\r\n\r\nHello"
+    assert parse_bytes(raw.encode()).parse_warnings == [
+        f"{header} address =?utf-8?q?service=40paypal=2Ecom?=@evil.com has encoded text in it, which isn't "
+        "allowed in an address. Some mail clients decode it and show service@paypal.com@evil.com"]
 
 
 @pytest.mark.parametrize("from_value, display_name", [
@@ -199,7 +207,7 @@ def test_address_with_encoded_word_characters_has_no_warning():
     ("service@evil.com (PayPal Billing)", "PayPal Billing"),
 ])
 def test_display_name_decoding(from_value, display_name):
-    assert parse(f"From: {from_value}").from_addr.display_name == display_name
+    assert parse(f"From: {from_value}").from_addrs[0].display_name == display_name
 
 
 @pytest.mark.parametrize("from_value", [
@@ -239,30 +247,41 @@ def test_address_parser_error_gives_a_warning(monkeypatch):
 
     monkeypatch.setattr(parser, "getaddresses", fail)
     parsed = parse("From: a@example.org")
-    assert parsed.from_addr is None
+    assert parsed.from_addrs == []
     assert "From header couldn't be parsed (ValueError)" in parsed.parse_warnings
 
 
-def test_two_from_headers_warn_and_use_the_first():
-    # Mail clients and DMARC checks don't always pick the same one
-    parsed = parse("From: service@paypal.com", "From: x@evil.com")
-    # Not also "From has 2 addresses", since only the first header's addresses are read
-    assert parsed.parse_warnings == ["2 From headers found, using the first"]
-    assert parsed.from_addr.email == "service@paypal.com"
+@pytest.mark.parametrize("from_lines, headers", [
+    (("From: service@paypal.com", "From: x@evil.com"), 2),
+    (("From: service@paypal.com, x@evil.com",), 1),
+])
+def test_every_from_address_is_kept(from_lines, headers):
+    # In order and with no warning, since several Froms are a check's evidence
+    parsed = parse(*from_lines)
+    assert [a.email for a in parsed.from_addrs] == ["service@paypal.com", "x@evil.com"]
+    assert parsed.from_headers == headers
+    assert parsed.parse_warnings == []
 
 
-def test_two_addresses_in_from_warn_and_use_the_first():
-    parsed = parse("From: service@paypal.com, x@evil.com")
-    assert "From has 2 addresses, using the first" in parsed.parse_warnings
-    assert parsed.from_addr.email == "service@paypal.com"
-
-
-def test_two_reply_to_headers_warn():
+def test_reply_to_headers_are_counted():
     parsed = parse("From: a@example.org", "Reply-To: a@example.org", "Reply-To: x@evil.net")
-    assert parsed.parse_warnings == ["2 Reply-To headers found, checking the addresses in all of them"]
+    assert parsed.reply_to_headers == 2
     assert [a.email for a in parsed.reply_to] == ["a@example.org", "x@evil.net"]
-    # One Reply-To gives no warning
-    assert parse("From: a@example.org", "Reply-To: a@example.org").parse_warnings == []
+    assert parsed.parse_warnings == []
+
+
+@pytest.mark.parametrize("name", ["From", "Reply-To"])
+@pytest.mark.parametrize("broken", [
+    "y@evil.net (Support",
+    # Neither parse finds an address in it, and the header before it has one
+    "(y@evil.net",
+])
+def test_a_header_the_tool_cant_read_doesnt_hide_the_others(name, broken):
+    # Read together, the strict parser drops every address when one header is broken, so a
+    # junk second header could hide the real first one
+    parsed = parse(f"{name}: x@evil.net", f"{name}: {broken}")
+    assert [a.email for a in (parsed.from_addrs if name == "From" else parsed.reply_to)] == ["x@evil.net"]
+    assert parsed.parse_warnings == [f"{name} {UNREADABLE}. Check the header by hand."]
 
 
 def test_to_date_and_message_id():

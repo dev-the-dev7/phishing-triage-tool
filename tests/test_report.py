@@ -7,7 +7,7 @@ from triage.report import build_report, build_text_report, render_json, render_m
 
 
 def report_of(checks=(), found=None, results=None, warnings=(), origin=None, **fields):
-    parsed = ParsedEmail(**{"from_addr": Address("", "a@example.org", "example.org"), "subject": "s", **fields})
+    parsed = ParsedEmail(**{"from_addrs": [Address("", "a@example.org", "example.org")], "subject": "s", **fields})
     return build_report(parsed, origin, list(checks), found or Indicators(), results or {}, list(warnings))
 
 
@@ -68,7 +68,7 @@ def test_a_padded_name_cant_hide_the_address():
     # quote in it can make another address look like the sender's
     sender = Address('PayPal" <service@paypal.com>' + " " * 400, "attacker@evil.com", "evil.com")
     to = [Address("", f"user{n}@example.net", "example.net") for n in range(7)]
-    email = section(render_text(report_of(from_addr=sender, to=to)), "Email")
+    email = section(render_text(report_of(from_addrs=[sender], to=to)), "Email")
     assert email[0].startswith(r'  From:        "PayPal\" <service@paypal.com>   ')
     assert email[0].endswith('" <attacker@evil.com>')
     assert email[1] == ("  To:          user0@example.net; user1@example.net; user2@example.net; user3@example.net; "
@@ -78,7 +78,7 @@ def test_a_padded_name_cant_hide_the_address():
 def test_cutting_a_name_keeps_its_quotes_escaped():
     # The quote lands right after the cut, where the backslash in front of it could be lost
     sender = Address("A" * 200 + '" <service@paypal.com>' + " " * 128, "attacker@evil.com", "evil.com")
-    from_line = section(render_text(report_of(from_addr=sender)), "Email")[0]
+    from_line = section(render_text(report_of(from_addrs=[sender])), "Email")[0]
     assert r'(50 characters left out) ... \" <service@paypal.com>' in from_line
 
 
@@ -132,12 +132,13 @@ def note_section(note: str, heading: str) -> list[str]:
 
 CHECKS = [Check("DMARC", "flag", "strong", "dmarc=fail for paypa1.com", caveats=["c"]),
           Check("DKIM", "inconclusive", "medium", "dkim=none"),
-          Check("SPF", "pass", "medium", "spf=pass"), Check("Script, file or app link", "pass", "medium", "ok")]
+          Check("SPF", "pass", "medium", "spf=pass"),
+          Check("Script, file or app link", "pass", "medium", "ok", caveats=["d"])]
 
 
 def test_the_note_follows_the_guide():
     report = report_of(CHECKS, found=Indicators(domains=["paypa1.com"]), message_id="<1@paypa1.com>",
-                       from_addr=Address("", "a@paypa1.com", "paypa1.com"), warnings=["w"],
+                       from_addrs=[Address("", "a@paypa1.com", "paypa1.com")], warnings=["w"],
                        attachments=[Attachment("a.pdf", "application/pdf", 5, "f" * 64)])
     note = render_markdown(report)
     assert [line for line in note.splitlines() if line.startswith("#")] == [
@@ -154,19 +155,32 @@ def test_the_note_follows_the_guide():
     assert note_section(note, "## Signals") == ["- **DMARC** (strong): `dmarc=fail for paypa1[.]com`",
                                                 "  - Caveat: `c`"]
     assert note_section(note, "## Inconclusive") == ["- **DKIM** (medium): `dkim=none`"]
-    assert note_section(note, "## Passed") == ["SPF; Script, file or app link"]
+    assert note_section(note, "## Passed") == ["SPF; Script, file or app link",
+                                               "- Caveat on **Script, file or app link**: `d`"]
     assert note_section(note, "## Typical follow-ups if confirmed malicious")[2:4] == [
         "  - Message-ID: `<1[@]paypa1[.]com>`", "  - Sender: `a[@]paypa1[.]com`"]
     assert note_section(note, "## Analyst decision") == ["- Verdict:", "- Actions taken:"]
 
 
 def test_a_note_with_nothing_flagged_or_no_sender():
-    note = render_markdown(report_of([Check("SPF", "pass", "medium", "spf=pass")], from_addr=None))
+    note = render_markdown(report_of([Check("SPF", "pass", "medium", "spf=pass")], from_addrs=[]))
     assert note_section(note, "## Signals") == ["None."]
     assert note_section(note, "## Inconclusive") == ["None."]
     assert note_section(note, "## Summary")[1] == "- From: (missing)"
     assert [line for line in note_section(note, "## Typical follow-ups if confirmed malicious")
             if line.startswith("  -")] == []
+
+
+def test_every_from_address_is_shown():
+    # The attacker's address can be any of them
+    report = report_of(from_addrs=[Address("", "a@example.org", "example.org"), Address("", "x@evil.com", "evil.com")])
+    assert section(render_text(report), "Email")[0] == "  From:        a@example.org; x@evil.com"
+    note = render_markdown(report)
+    assert note_section(note, "## Summary")[1] == "- From: `a[@]example[.]org`; `x[@]evil[.]com`"
+    assert "  - Sender: `a[@]example[.]org`; `x[@]evil[.]com`" in note_section(
+        note, "## Typical follow-ups if confirmed malicious")
+    assert json.loads(render_json(report))["email"]["from"] == [{"name": "", "address": "a@example.org"},
+                                                               {"name": "", "address": "x@evil.com"}]
 
 
 def test_a_missing_subject_or_file_name_isnt_shown_as_the_emails_text():

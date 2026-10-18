@@ -14,7 +14,7 @@ def link_to(domain: str) -> ParsedEmail:
 
 
 def sent_as(display_name: str, domain: str = "evil.com") -> ParsedEmail:
-    return ParsedEmail(from_addr=Address(display_name, f"someone@{domain}", domain))
+    return ParsedEmail(from_addrs=[Address(display_name, f"someone@{domain}", domain)])
 
 
 def known_limitation(*values, reason: str):
@@ -295,8 +295,8 @@ def test_link_to_the_real_brand_doesnt_end_the_check():
 
 def test_display_name_from_an_address_without_a_domain():
     # The evidence names the whole address when there's no domain to show
-    parsed = ParsedEmail(from_addr=Address("PayPal", "service", ""))
-    assert check_display_name(parsed).evidence == '"PayPal" mentions "paypal" but the mail is from service'
+    check = check_display_name(ParsedEmail(from_addrs=[Address("PayPal", "service", "")]))
+    assert check.evidence == '"PayPal" mentions "paypal" but the mail is from service'
 
 
 def test_display_name_shows_the_address_it_hides():

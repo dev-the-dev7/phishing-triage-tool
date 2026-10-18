@@ -41,7 +41,8 @@ def defang_text(text: str) -> str:
     # stops, which aren't between two letters
     text = re.sub(r"(?<![a-z])http(?=s?:)", "hxxp", text, flags=re.I)
     text = re.sub(r"(?<=[\w-])\.(?=[\w-])", "[.]", text)
-    return re.sub(r"(?<=[\w.+%-])@(?=[\w-])", "[@]", text)
+    # Anything an address can have before its @, like the = that ends encoded text
+    return re.sub(r"(?<=[\w.!#$%&'*+/=?^`{|}~-])@(?=[\w-])", "[@]", text)
 
 
 def from_email(parsed: ParsedEmail, origin: Origin | None) -> Indicators:
@@ -49,7 +50,7 @@ def from_email(parsed: ParsedEmail, origin: Origin | None) -> Indicators:
     # listed, since phishing names the real brand to look genuine, and neither is a link's text.
     urls, hosts, emails = [], [], []
     # The sender's first, so a long list of link domains can't push them down
-    for address in [parsed.from_addr, *parsed.reply_to, parsed.return_path]:
+    for address in [*parsed.from_addrs, *parsed.reply_to, parsed.return_path]:
         if address:
             emails.append(address.email)
             hosts.append(address.domain)

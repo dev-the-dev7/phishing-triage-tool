@@ -9,7 +9,7 @@ from triage import html_reader
 from triage.impersonation import check_lookalike
 from triage.iocs import from_email
 from triage.links import check_link_mismatch, check_link_type
-from triage.models import Link, ParsedEmail, Result
+from triage.models import Check, Link, ParsedEmail, Result
 from triage.parser import parse_bytes
 
 HEADERS = "From: a@example.org\r\nTo: someone@example.net\r\nSubject: s\r\n"
@@ -634,22 +634,41 @@ def test_links_are_read_against_every_base(decoy):
                                 '<a href="https://other.net/">Other</a>')
     assert links_in(parsed) == [("https://paypal.com/login", "Sign in"), ("https://evil.com/login", "Sign in"),
                                 ("https://other.net/", "Other")]
-    assert parsed.parse_warnings == ["The HTML has 2 different <base> tags. Browsers use one, "
-                                     "so links were read against each."]
+    assert check_link_mismatch(parsed).caveats == ["The HTML has 2 different <base> tags, which set where links "
+                                                   "go. Browsers use one, so links were read against each."]
 
 
 def test_base_limit(monkeypatch):
-    # Up to the limit every base is read. Past it, the warning says to check the rest by hand.
+    # Past the limit some places a link goes weren't read, so the check can't pass
     monkeypatch.setattr(html_reader, "MAX_BASES", 2)
+    monkeypatch.setattr("triage.links.MAX_BASES", 2)
     bases = '<base href="https://one.com/"><base href="https://two.com/">'
     at_limit = html_email(bases + '<a href="/login">Sign in</a>')
     assert [href for href, _ in links_in(at_limit)] == ["https://one.com/login", "https://two.com/login"]
-    assert at_limit.parse_warnings == ["The HTML has 2 different <base> tags. Browsers use one, "
-                                       "so links were read against each."]
+    assert check_link_mismatch(at_limit).result == Result.PASS
     over_limit = html_email(bases + '<base href="https://evil.com/"><a href="/login">Sign in</a>')
     assert [href for href, _ in links_in(over_limit)] == ["https://one.com/login", "https://two.com/login"]
-    assert over_limit.parse_warnings == ["The HTML has 3 different <base> tags, which set where links go. "
-                                         "Links were read against the first 2. Check the rest by hand."]
+    unread = ("The HTML has 3 different <base> tags, which set where links go. Links were read against the "
+              "first 2. Check the rest by hand.")
+    assert check_link_mismatch(over_limit) == Check("Link text vs destination", Result.INCONCLUSIVE, "strong",
+                                                    unread)
+    flagged = check_link_mismatch(html_email(bases + '<base href="https://evil.com/">'
+                                                     '<a href="/login">paypal.com</a>'))
+    assert (flagged.result, flagged.caveats) == (Result.FLAG, [unread])
+
+
+def test_bases_no_link_uses_dont_count(monkeypatch):
+    monkeypatch.setattr(html_reader, "MAX_BASES", 2)
+    monkeypatch.setattr("triage.links.MAX_BASES", 2)
+    bases = '<base href="https://one.com/"><base href="https://two.com/"><base href="https://evil.com/">'
+    check = check_link_mismatch(html_email(bases + '<a href="https://example.org/">example.org</a>'))
+    assert (check.result, check.caveats) == (Result.PASS, [])
+
+
+def test_a_base_only_outlook_reads_is_counted():
+    parsed = html_email('<base href="https://paypal.com/"><!--[if mso]><base href="https://evil.com/"><![endif]-->'
+                        '<a href="/login">Sign in</a>')
+    assert parsed.base_tags == 2
 
 
 def test_no_break_space_before_a_link_isnt_trimmed():

@@ -1,10 +1,11 @@
-"""Checks that the sender headers add up: SPF/DKIM/DMARC, Reply-To, Return-Path, free webmail."""
+"""Checks that the sender headers add up: SPF/DKIM/DMARC, one clear From, Reply-To, Return-Path,
+free webmail."""
 
 import re
 
 from .domains import base_domain
 from .lists import FREE_EMAIL_DOMAINS, TRUSTED_AUTHSERV_IDS
-from .models import Check, ParsedEmail, Result, Strength
+from .models import Address, Check, ParsedEmail, Result, Strength, for_each_from, join_first_five
 
 
 # Results that count as a failure. Others besides pass (none, neutral, temperror) are
@@ -12,7 +13,26 @@ from .models import Check, ParsedEmail, Result, Strength
 AUTH_FAILURES = ("fail", "softfail", "permerror")
 
 
-def check_authentication(parsed: ParsedEmail) -> list[Check]:
+def check_spf(parsed: ParsedEmail) -> Check:
+    # About the envelope sender, not the From, and medium because forwarding breaks it
+    results, source = _trusted_results(parsed)
+    return _check_single_result("SPF", results.get("spf", []), Strength.MEDIUM, source)
+
+
+def check_dkim(parsed: ParsedEmail) -> Check:
+    # Medium, since mailing lists break it
+    results, source = _trusted_results(parsed)
+    return for_each_from(parsed.from_addrs, lambda from_addr: _check_dkim(
+        results.get("dkim", []), parsed.dkim_signatures, from_addr, source))
+
+
+def check_dmarc(parsed: ParsedEmail) -> Check:
+    # Strong, as the one that ties authentication to the From domain the reader sees
+    results, source = _trusted_results(parsed)
+    return for_each_from(parsed.from_addrs, lambda from_addr: _check_dmarc(results.get("dmarc", []), from_addr, source))
+
+
+def _trusted_results(parsed: ParsedEmail) -> tuple[dict[str, list[tuple[str, str]]], str]:
     if TRUSTED_AUTHSERV_IDS:
         # Only headers from your provider's servers count, as RFC 8601 recommends,
         # since anyone can write this header
@@ -33,14 +53,7 @@ def check_authentication(parsed: ParsedEmail) -> list[Check]:
     untrusted_count = len(parsed.auth_results) - min(len(trusted), 1)
     if untrusted_count:
         source += f", ignored {untrusted_count} untrusted header(s)"
-
-    # DMARC is strong because it's the one that ties authentication to the visible From
-    # domain. Forwarding breaks SPF and mailing lists break DKIM, so those mean less alone.
-    return [
-        _check_single_result("SPF", results.get("spf", []), Strength.MEDIUM, source),
-        _check_dkim(results.get("dkim", []), parsed, source),
-        _check_dmarc(results.get("dmarc", []), parsed, source),
-    ]
+    return results, source
 
 
 def _results_text(name: str, clauses: list[tuple[str, str]], source: str) -> str:
@@ -68,7 +81,8 @@ def _check_single_result(name: str, clauses: list[tuple[str, str]], strength: St
     return Check(name, result, strength, evidence)
 
 
-def _check_dkim(clauses: list[tuple[str, str]], parsed: ParsedEmail, source: str) -> Check:
+def _check_dkim(clauses: list[tuple[str, str]], signatures: list[str], from_addr: Address | None,
+                source: str) -> Check:
     # One valid signature is enough, but it has to be from the From domain's organization, as
     # DMARC requires. Anyone can sign with their own domain.
     name, strength = "DKIM", Strength.MEDIUM
@@ -77,13 +91,13 @@ def _check_dkim(clauses: list[tuple[str, str]], parsed: ParsedEmail, source: str
 
     evidence = _results_text(name, clauses, source)
     values = [result for result, _ in clauses]
-    from_domain = parsed.from_addr.domain if parsed.from_addr else ""
+    from_domain = from_addr.domain if from_addr else ""
     from_base = base_domain(from_domain) if from_domain else ""
     aligned = [result for result, domain in clauses if domain and base_domain(domain) == from_base]
 
     if "pass" in aligned:
         result = Result.PASS
-        body_length = _signed_body_length(parsed.dkim_signatures, from_base)
+        body_length = _signed_body_length(signatures, from_base)
         if body_length:
             result = Result.INCONCLUSIVE
             evidence += (f". The {from_base} signature covers only the first {body_length} bytes "
@@ -98,11 +112,11 @@ def _check_dkim(clauses: list[tuple[str, str]], parsed: ParsedEmail, source: str
     return Check(name, result, strength, evidence)
 
 
-def _check_dmarc(clauses: list[tuple[str, str]], parsed: ParsedEmail, source: str) -> Check:
+def _check_dmarc(clauses: list[tuple[str, str]], from_addr: Address | None, source: str) -> Check:
     # DMARC names the From it checked in header.from. With two Froms, it can check one while
     # the mail client shows the other.
     check = _check_single_result("DMARC", clauses, Strength.STRONG, source)
-    from_domain = parsed.from_addr.domain if parsed.from_addr else ""
+    from_domain = from_addr.domain if from_addr else ""
     checked = {base_domain(domain) for _, domain in clauses if domain}
     if check.result == Result.PASS and checked and checked != {base_domain(from_domain)}:
         return Check(check.name, Result.INCONCLUSIVE, check.strength,
@@ -156,51 +170,95 @@ def _parse_auth_results(header: str) -> tuple[str, dict[str, list[tuple[str, str
     return authserv_id, results
 
 
-def check_reply_to(parsed: ParsedEmail) -> Check:
-    name, strength = "Reply-To", Strength.STRONG
-    if not parsed.reply_to:
-        return Check(name, Result.PASS, strength, "No Reply-To, replies go to the sender")
-    if not parsed.from_addr or not parsed.from_addr.domain:
-        return Check(name, Result.INCONCLUSIVE, strength, "No readable From domain to compare against")
+def check_ambiguous_from(parsed: ParsedEmail) -> list[Check]:
+    # Ways to make a mail client show a different From than the one DMARC checked. Only listed
+    # when found, since real mail almost never does this.
+    found, count = [], ""
+    if parsed.from_headers > 1:
+        count = f"{parsed.from_headers} From headers"
+    elif len(parsed.from_addrs) > 1:
+        count = f"From has {len(parsed.from_addrs)} addresses"
+    if count:
+        listed = f" ({join_first_five([a.email for a in parsed.from_addrs])})" if parsed.from_addrs else ""
+        found.append(f"{count}{listed}. Mail clients and DMARC checks don't always use the same one")
+    found += [_encoded(a) for a in parsed.from_addrs if a.decoded]
+    if not found:
+        return []
+    return [Check("Ambiguous From", Result.FLAG, Strength.STRONG, ". ".join(found))]
 
-    sender = parsed.from_addr
+
+def _encoded(address: Address) -> str:
+    return (f"{address.email} has encoded text in it, which isn't allowed in an address. Some mail clients "
+            f"decode it and show {address.decoded}")
+
+
+def check_reply_to(parsed: ParsedEmail) -> Check:
+    return for_each_from(parsed.from_addrs, lambda from_addr: _check_reply_to(parsed, from_addr))
+
+
+def _check_reply_to(parsed: ParsedEmail, from_addr: Address | None) -> Check:
+    name, strength = "Reply-To", Strength.STRONG
+    caveats = []
+    if parsed.reply_to_headers > 1:
+        caveats.append(f"The email has {parsed.reply_to_headers} Reply-To headers, where one is allowed. Which "
+                       "one a mail client uses isn't defined, so the addresses in all of them were checked.")
+    encoded = [_encoded(a) for a in parsed.reply_to if a.decoded]
+    if not parsed.reply_to:
+        return Check(name, Result.PASS, strength, "No Reply-To, replies go to the sender", caveats)
+    if not from_addr or not from_addr.domain:
+        return Check(name, Result.INCONCLUSIVE, strength, "No readable From domain to compare against",
+                     caveats + [f"{text}." for text in encoded])
+
     # On free webmail everyone shares the domain, so compare the whole address instead
-    if base_domain(sender.domain) in FREE_EMAIL_DOMAINS:
-        expected = sender.email.lower()
+    if base_domain(from_addr.domain) in FREE_EMAIL_DOMAINS:
+        expected = from_addr.email.lower()
         mismatches = [a.email for a in parsed.reply_to if a.email.lower() != expected]
     else:
-        expected = base_domain(sender.domain)
+        expected = base_domain(from_addr.domain)
         # The whole address when there's no domain to show ("Reply-To: undisclosed")
         mismatches = [a.domain or a.email for a in parsed.reply_to if base_domain(a.domain) != expected]
 
     if mismatches:
-        return Check(name, Result.FLAG, strength, f"Replies go to {', '.join(dict.fromkeys(mismatches))}, not {expected}")
-    return Check(name, Result.PASS, strength, f"Reply-To matches the sender ({expected})")
+        evidence = f"Replies go to {', '.join(dict.fromkeys(mismatches))}, not {expected}"
+        return Check(name, Result.FLAG, strength, evidence, caveats + [f"{text}." for text in encoded])
+    # A client that decodes the address may reply to what it shows
+    if encoded:
+        return Check(name, Result.INCONCLUSIVE, strength,
+                     f"Reply-To matches the sender ({expected}) as written. {'. '.join(encoded)}", caveats)
+    return Check(name, Result.PASS, strength, f"Reply-To matches the sender ({expected})", caveats)
 
 
 def check_return_path(parsed: ParsedEmail) -> Check:
+    return for_each_from(parsed.from_addrs, lambda from_addr: _check_return_path(parsed, from_addr))
+
+
+def _check_return_path(parsed: ParsedEmail, from_addr: Address | None) -> Check:
     # Weak on its own: mailing services often use their own bounce domain
     name, strength = "Return-Path domain", Strength.WEAK
-    if not parsed.return_path or not parsed.from_addr:
+    if not parsed.return_path or not from_addr:
         return Check(name, Result.INCONCLUSIVE, strength, "Return-Path or From missing, nothing to compare")
-    if not parsed.return_path.domain or not parsed.from_addr.domain:
+    if not parsed.return_path.domain or not from_addr.domain:
         return Check(name, Result.INCONCLUSIVE, strength, "Return-Path or From has no domain, nothing to compare")
 
-    from_base = base_domain(parsed.from_addr.domain)
+    from_base = base_domain(from_addr.domain)
     rp_base = base_domain(parsed.return_path.domain)
     if rp_base != from_base:
         return Check(name, Result.FLAG, strength,
-                     f"Bounces go to {parsed.return_path.domain}, From is {parsed.from_addr.domain}")
+                     f"Bounces go to {parsed.return_path.domain}, From is {from_addr.domain}")
     return Check(name, Result.PASS, strength, f"Return-Path matches the From domain ({from_base})")
 
 
 def check_free_email(parsed: ParsedEmail) -> Check:
+    return for_each_from(parsed.from_addrs, _check_free_email)
+
+
+def _check_free_email(from_addr: Address | None) -> Check:
     # Weak alone since lots of real mail comes from Gmail. It matters more next to a
     # display name claiming to be a company or an executive.
     name, strength = "Free webmail sender", Strength.WEAK
-    if not parsed.from_addr or not parsed.from_addr.domain:
+    if not from_addr or not from_addr.domain:
         return Check(name, Result.INCONCLUSIVE, strength, "No readable From domain")
-    base = base_domain(parsed.from_addr.domain)
+    base = base_domain(from_addr.domain)
     if base in FREE_EMAIL_DOMAINS:
         return Check(name, Result.FLAG, strength, f"Sent from a free {base} account, which anyone can create")
     return Check(name, Result.PASS, strength, f"{base} isn't on the free webmail list")

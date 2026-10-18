@@ -1,10 +1,12 @@
 {
   "format": 1,
   "email": {
-    "from": {
-      "name": "PayPal Security",
-      "address": "security@paypa1.com"
-    },
+    "from": [
+      {
+        "name": "PayPal Security",
+        "address": "security@paypa1.com"
+      }
+    ],
     "to": [
       {
         "name": "Jordan Lee",

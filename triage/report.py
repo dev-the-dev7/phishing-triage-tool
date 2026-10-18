@@ -35,7 +35,7 @@ JSON_FORMAT = 1
 
 @dataclass
 class EmailFacts:
-    from_addr: Address | None
+    from_addrs: list[Address]
     to: list[Address]
     reply_to: list[Address]
     return_path: Address | None
@@ -80,7 +80,7 @@ class Report:
 
 def build_report(parsed: ParsedEmail, origin: Origin | None, checks: list[Check], found: Indicators,
                  results: dict[str, list[Reputation]], warnings: list[str]) -> Report:
-    email = EmailFacts(parsed.from_addr, parsed.to, parsed.reply_to, parsed.return_path, parsed.subject, parsed.date,
+    email = EmailFacts(parsed.from_addrs, parsed.to, parsed.reply_to, parsed.return_path, parsed.subject, parsed.date,
                        parsed.message_id, len(parsed.links), parsed.attachments)
     # sorted() keeps the checks' own order within a result and strength
     findings = sorted(checks, key=lambda check: (RESULT_ORDER.index(check.result),
@@ -170,7 +170,7 @@ def _counts(report: Report) -> list[str]:
 
 def _email_lines(report: Report) -> list[str]:
     email = report.email
-    lines = [f"  From:        {_address(email.from_addr) if email.from_addr else '(missing)'}"]
+    lines = [] if email.from_addrs else ["  From:        (missing)"]
     for label, addresses in _address_fields(email):
         lines.append(f"  {label + ':':<12} {join_first_five(list(map(_address, addresses)))}")
     for label, value in (("Date", email.date), ("Message-ID", email.message_id)):
@@ -189,7 +189,8 @@ def _file_name(attachment: Attachment, shown) -> str:
 
 
 def _address_fields(email: EmailFacts) -> list[tuple[str, list[Address]]]:
-    fields = [("To", email.to), ("Reply-To", email.reply_to), ("Return-Path", [email.return_path])]
+    fields = [("From", email.from_addrs), ("To", email.to), ("Reply-To", email.reply_to),
+              ("Return-Path", [email.return_path])]
     return [(label, addresses) for label, addresses in fields if addresses and addresses[0]]
 
 
@@ -254,7 +255,7 @@ def render_markdown(report: Report) -> str:
 
 def _md_email(report: Report) -> list[str]:
     email = report.email
-    lines = [f"- From: {_md_address(email.from_addr) if email.from_addr else '(missing)'}"]
+    lines = [] if email.from_addrs else ["- From: (missing)"]
     for label, addresses in _address_fields(email):
         lines.append(f"- {label}: {join_first_five(list(map(_md_address, addresses)))}")
     for label, value in (("Date", email.date), ("Message-ID", email.message_id)):
@@ -280,9 +281,13 @@ def _md_findings(report: Report) -> list[str]:
                 body.append(f"- **{check.name}** ({check.strength}): {_md(check.evidence, MAX_LONG_CHARS)}")
                 body += [f"  - Caveat: {_md(caveat, MAX_LONG_CHARS)}" for caveat in check.caveats]
         lines += [f"## {heading}", "", *(body or ["None."]), ""]
-    passed = [check.name for check in report.findings if check.result == Result.PASS]
+    passed = [check for check in report.findings if check.result == Result.PASS]
     # Semicolons, since one check's name has commas in it
-    return lines + ["## Passed", "", "; ".join(passed) or "None.", ""]
+    lines += ["## Passed", "", "; ".join(check.name for check in passed) or "None.", ""]
+    # Caveats are for the analyst whatever the result, so the one-line list doesn't drop them
+    caveats = [f"- Caveat on **{check.name}**: {_md(caveat, MAX_LONG_CHARS)}"
+               for check in passed for caveat in check.caveats]
+    return lines + ([*caveats, ""] if caveats else [])
 
 
 def _md_indicators(report: Report) -> list[str]:
@@ -309,8 +314,8 @@ def _md_follow_ups(report: Report) -> list[str]:
     lines = [f"- {find}"]
     if report.email.message_id:
         lines.append(f"  - Message-ID: {_md(report.email.message_id)}")
-    if report.email.from_addr:
-        lines.append(f"  - Sender: {_md(report.email.from_addr.email)}")
+    if report.email.from_addrs:
+        lines.append(f"  - Sender: {join_first_five([_md(a.email) for a in report.email.from_addrs])}")
     return lines + [f"- {suggestion}" for suggestion in rest]
 
 
@@ -334,7 +339,7 @@ def render_json(report: Report) -> str:
     data = {
         "format": JSON_FORMAT,
         "email": None if email is None else {
-            "from": _json_address(email.from_addr), "to": list(map(_json_address, email.to)),
+            "from": list(map(_json_address, email.from_addrs)), "to": list(map(_json_address, email.to)),
             "reply_to": list(map(_json_address, email.reply_to)), "return_path": _json_address(email.return_path),
             "subject": email.subject, "date": email.date, "message_id": email.message_id, "link_count": email.links,
             "attachments": [{"filename": a.filename, "content_type": a.content_type, "size": a.size,

@@ -57,24 +57,20 @@ def _parse_message(raw: bytes) -> ParsedEmail:
         raise ValueError("no email headers found, is this an .eml file?")
 
     warnings = []
-    # With several From headers or addresses, mail clients and DMARC checks don't always
-    # pick the same one
-    from_count = _count_headers(msg, "From")
-    if from_count > 1:
-        warnings.append(f"{from_count} From headers found, using the first")
-    from_list = _addresses(msg, "From", warnings)
-    if len(from_list) > 1:
-        warnings.append(f"From has {len(from_list)} addresses, using the first")
-    # Only one Reply-To is allowed, and with more, which one a client uses isn't defined
-    reply_to_count = _count_headers(msg, "Reply-To")
-    if reply_to_count > 1:
-        warnings.append(f"{reply_to_count} Reply-To headers found, checking the addresses in all of them")
+    from_addrs = _addresses(msg, "From", warnings, every_header=True)
     # Reported phish often arrive as an attachment, and the checks would read the forward
     for name in _attached_emails(msg):
         warnings.append(f"{name} is an email attached to this one. If this is a forwarded report, "
                         "the checks ran on the wrapper. Save the attachment and run the tool on it.")
 
     return_path = _addresses(msg, "Return-Path", warnings)
+    to = _addresses(msg, "To", warnings)
+    # In From and Reply-To, encoded text is a check's evidence. These two don't change who the
+    # email seems to be from or where replies go.
+    for name, found in (("Return-Path", return_path), ("To", to)):
+        warnings += [f"{name} address {address.email} has encoded text in it, which isn't allowed in an "
+                     f"address. Some mail clients decode it and show {address.decoded}"
+                     for address in found if address.decoded]
     text_body = "\n".join(_shown_texts(msg, "plain", warnings))
     html_parts = _shown_texts(msg, "html", warnings)
     collected = [read_html(html, warnings) for html in html_parts]
@@ -86,10 +82,12 @@ def _parse_message(raw: bytes) -> ParsedEmail:
     links = [replace(link, href=href) for link, hrefs in zip(links, places) for href in hrefs]
 
     return ParsedEmail(
-        from_addr=from_list[0] if from_list else None,
+        from_addrs=from_addrs,
+        from_headers=_count_headers(msg, "From"),
         reply_to=_addresses(msg, "Reply-To", warnings, every_header=True),
+        reply_to_headers=_count_headers(msg, "Reply-To"),
         return_path=return_path[0] if return_path else None,
-        to=_addresses(msg, "To", warnings),
+        to=to,
         subject=_text_header(msg, "Subject", warnings),
         date=_header(msg, "Date", warnings),
         # As written, since a search of the mail logs needs it exactly
@@ -105,6 +103,7 @@ def _parse_message(raw: bytes) -> ParsedEmail:
         html_images=sum(part.images for part in collected),
         links=links,
         other_urls=[url for part in collected for url in part.other_urls],
+        base_tags=max((part.bases for part in collected), default=0),
         attachments=_attachments(msg),
         parse_warnings=warnings,
     )
@@ -149,28 +148,30 @@ def _addresses(msg, name, warnings, every_header=False) -> list[Address]:
     # As written, since the library decodes encoded words even inside an address
     raw = _raw_headers(msg, name) if every_header else _raw_headers(msg, name)[:1]
     try:
-        # Strict mode drops what it can't read, sometimes one address of several. The lenient
-        # parse only notices that.
-        pairs = getaddresses(raw)
-        lenient = getaddresses(raw, strict=False)
+        # Strict mode drops what it can't read, sometimes one address of several, and given
+        # several headers at once, every address in all of them. So each header is read on its
+        # own. The lenient parse only notices what was dropped.
+        per_header = [getaddresses([value]) for value in raw]
+        lenient = [pair for value in raw for pair in getaddresses([value], strict=False)]
     except Exception as e:
         _warn_unreadable(warnings, name, e)
         return []
 
+    pairs = [pair for found in per_header for pair in found]
     result = []
     for display_name, addr in pairs:
         if not addr:
             continue
         # Encoded text isn't allowed in an address, but mail clients hit by the Mailsploit bugs
         # decoded it anyway and showed an address that isn't the real one
-        shown = _decode_words(addr, name, warnings)
-        if shown != addr:
-            warnings.append(f"{name} address {addr} has encoded text in it, which isn't allowed in an "
-                            f"address. Some mail clients decode it and show {shown}")
+        decoded = _decode_words(addr, name, warnings)
         domain = addr.rpartition("@")[2].lower() if "@" in addr else ""
-        result.append(Address(_decode_words(display_name, name, warnings), addr, domain))
+        result.append(Address(_decode_words(display_name, name, warnings), addr, domain,
+                              decoded if decoded != addr else ""))
     dropped = {addr for _, addr in lenient if addr} - {addr for _, addr in pairs}
-    if (any("@" in value for value in raw) and not result) or dropped:
+    # A header with an @ that gave no address, even when another header gave one
+    unread = any("@" in value and not any(addr for _, addr in found) for value, found in zip(raw, per_header))
+    if unread or dropped:
         warnings.append(f"{name} has an address the tool couldn't read safely. Check the header by hand.")
     return result
 

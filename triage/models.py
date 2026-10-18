@@ -1,7 +1,13 @@
-"""Dataclasses passed between the pipeline stages, and how a check's evidence is written."""
+"""Dataclasses passed between the pipeline stages, how a check's evidence is written, and running
+a check on every From address."""
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
+
+# A check that compares the From runs once for each From address. Real mail has one, and on
+# thousands the Reply-To check alone would take minutes.
+MAX_FROMS = 10
 
 
 @dataclass
@@ -9,6 +15,8 @@ class Address:
     display_name: str
     email: str
     domain: str  # lowercased, "" if there's no @
+    # What some mail clients show when the address has encoded text, which isn't allowed in one
+    decoded: str = ""
 
 
 @dataclass
@@ -65,6 +73,25 @@ def join_first_five(items: list[str]) -> str:
     return "; ".join(items[:5]) + extra
 
 
+def for_each_from(from_addrs: list[Address], check: Callable[[Address | None], Check]) -> Check:
+    # Mail clients don't agree on which From they show, so the check runs on each, or on None
+    # when there's no From address to read. Any flag counts, and a pass needs them all.
+    runs = [check(from_addr) for from_addr in from_addrs[:MAX_FROMS] or [None]]
+    unchecked = max(len(from_addrs) - MAX_FROMS, 0)
+    if len(runs) == 1 and not unchecked:
+        return runs[0]
+    result = next(r for r in (Result.FLAG, Result.INCONCLUSIVE, Result.PASS) if any(c.result == r for c in runs))
+    matching = [run for run in runs if run.result == result]
+    evidence = "; ".join(dict.fromkeys(run.evidence for run in matching))
+    if result == Result.PASS and unchecked:
+        result = Result.INCONCLUSIVE
+        evidence += f". Only the first {len(runs)} of {len(from_addrs):,} From addresses were checked"
+    return Check(matching[0].name, result, matching[0].strength, evidence,
+                 list(dict.fromkeys(caveat for run in runs for caveat in run.caveats)),
+                 list(dict.fromkeys(domain for run in matching for domain in run.domains)),
+                 list(dict.fromkeys(ip for run in matching for ip in run.ips)))
+
+
 @dataclass
 class Origin:
     # ip and name are None when every hop is inside the provider (like Gmail to Gmail)
@@ -81,8 +108,10 @@ class Origin:
 
 @dataclass
 class ParsedEmail:
-    from_addr: Address | None = None
+    from_addrs: list[Address] = field(default_factory=list)  # from every From header, in order
+    from_headers: int = 0
     reply_to: list[Address] = field(default_factory=list)
+    reply_to_headers: int = 0
     return_path: Address | None = None
     to: list[Address] = field(default_factory=list)
     subject: str = ""
@@ -99,6 +128,7 @@ class ParsedEmail:
     html_images: int = 0  # images the HTML shows
     links: list[Link] = field(default_factory=list)  # in the HTML, then URLs written in the plain text
     other_urls: list[str] = field(default_factory=list)  # what the HTML loads or sends a form to
+    base_tags: int = 0  # different <base> tags the links were read against, the most in one HTML part
     attachments: list[Attachment] = field(default_factory=list)
     parse_warnings: list[str] = field(default_factory=list)
 

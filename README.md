@@ -9,8 +9,8 @@ Work in progress. What works now, with `python -m triage path/to/email.eml`:
 
 - Parsing the email: headers, addresses, text and HTML bodies, links, and attachment hashes
   (SHA-256, computed in memory)
-- Checks on the sender: SPF, DKIM, and DMARC results, Reply-To, Return-Path, display name,
-  and free webmail
+- Checks on the sender: SPF, DKIM, and DMARC results, a From that can be read more than
+  one way, Reply-To, Return-Path, display name, and free webmail
 - Lookalike domains and brands joined to other words, in the sender and in links
 - Link text that shows one domain but goes to another, and links that run a script or
   open a file share or another program
@@ -97,6 +97,12 @@ includes the company's root certificate.
   caveat is never the reason for the result, which is what the evidence is for. When a
   check can't tell, the result is inconclusive, not a pass with a caveat.
 
+- **Checks are about the email, warnings are about the tool's reading.** Something the
+  sender did, like two Reply-To headers, goes in a check's evidence or caveats, next to the
+  result it affects. A warning means part of the email couldn't be read, like a header the
+  tool couldn't parse, an unknown charset, or an email attached to this one, so that part
+  needs checking by hand.
+
 - **The report puts flags first, strongest first,** then inconclusive checks, then passes.
   Its summary gives the strongest flag and the count of each result. The strongest flag
   isn't a score: two weak flags don't add up to a medium one, since they can be the same
@@ -160,14 +166,30 @@ includes the company's root certificate.
   can check one while the mail client shows the other, so a pass for a different domain
   isn't counted.
 
+- **A From that can be read more than one way is a strong flag.** Two From headers, two
+  addresses in one, or encoded text in the address let a mail client show a different
+  From than the one DMARC checked, which researchers used to get past DMARC at large
+  providers ("Composition Kills", 2020). Real mail almost never does this (several authors
+  in one From is allowed, but rare), so the Ambiguous From check is only listed when it
+  finds something.
+
+- **Every From address is checked.** Mail clients don't agree on which one they show, so
+  each check that compares the From runs on every one: a flag on any of them counts, and a
+  pass needs all of them to pass. A DMARC pass for the attacker's own domain in one From
+  doesn't cover a brand's domain in the other. Past 10 addresses the rest aren't compared,
+  since comparing thousands with every Reply-To would take minutes, so those checks can't
+  pass.
+
 - **Encoded text is only decoded where it's allowed.** Python's email library decodes
   `=?utf-8?q?...?=` encoded words anywhere in a header, but they're only allowed in plain
   text like the Subject and display names. Received, Authentication-Results, and
   Return-Path copy text the sender chose (the envelope address, the HELO name), and
   decoding the valid address `=?utf-8?q?x=3Bdkim=3Dpass?=@evil.com` adds a fake DKIM pass.
   In a From address, `service@=?utf-8?q?paypal=2Ecom?=` would read as paypal.com. These
-  are read as written, and an address with encoded text gets a warning showing what some
-  mail clients display instead.
+  are read as written, along with what mail clients hit by the Mailsploit bugs display
+  instead. In the From address that's a flag, and in a Reply-To that otherwise matches the
+  sender it makes the check inconclusive, since such a client may reply to what it shows.
+  In To or Return-Path it's a warning.
 
 - **The originating server comes from the receiver's reverse DNS lookup, not the name the
   sender claims.** The sender can claim to be `mx.google.com`. The reverse DNS name is
@@ -218,7 +240,9 @@ includes the company's root certificate.
   display, not just the first, and URLs written out in a plain text part, which clients
   make clickable. Links inside `<!--[if mso]>` are read too: every other client takes that
   as a comment, but Outlook for Windows shows it, so a link can be there for Outlook users
-  only.
+  only. With several different `<base>` tags, links are read against each, since browsers
+  skip one inside `<template>` or `<svg>` and a decoy can come first. The link check says
+  so in a caveat, and past 10 it can't pass, since the rest weren't read.
 
 - **A link rewritten by a mail security service is read as where it really goes.**
   Microsoft Defender's Safe Links and Proofpoint rewrite every link in delivered mail to go

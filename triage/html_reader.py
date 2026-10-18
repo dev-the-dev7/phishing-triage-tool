@@ -283,6 +283,7 @@ class ParsedHTML:
     images: int  # images a browser would show
     links: list[Link]
     other_urls: list[str]  # what the HTML loads or sends a form to
+    bases: int  # different <base> tags the links were read against
 
 
 def read_html(html: str, warnings) -> ParsedHTML:
@@ -300,6 +301,7 @@ def read_html(html: str, warnings) -> ParsedHTML:
         parsed.links += [link for link in outlook.links if (link.href, link.text, link.full_text) not in seen]
         known = set(parsed.other_urls)
         parsed.other_urls += [url for url in outlook.other_urls if url not in known]
+        parsed.bases = max(parsed.bases, outlook.bases)
     return parsed
 
 
@@ -318,12 +320,6 @@ def _collect(html: str, warnings) -> ParsedHTML:
     # Browsers use the first <base>, but skip one in <template> or <svg>, which Python's parser
     # can't tell, so links are read against every base and a decoy can't hide the real one.
     bases = list(dict.fromkeys(browser_url(base) for base in collector.bases))
-    if len(bases) > MAX_BASES:
-        warnings.append(f"The HTML has {len(bases)} different <base> tags, which set where links go. "
-                        f"Links were read against the first {MAX_BASES}. Check the rest by hand.")
-    elif len(bases) > 1:
-        warnings.append(f"The HTML has {len(bases)} different <base> tags. Browsers use one, "
-                        "so links were read against each.")
     shown = "".join(text for text, hidden in collector.pieces if not hidden)
     return ParsedHTML(
         text="\n".join(_collapse_whitespace(line) for line in shown.split("\n") if line.strip()),
@@ -333,6 +329,8 @@ def _collect(html: str, warnings) -> ParsedHTML:
         links=[replace(link, href=href) for link in collector.links
                for href in _read_against_bases(link.href, bases)],
         other_urls=[href for url in collector.other_urls for href in _read_against_bases(url, bases)],
+        # Bases no link was read against don't change where any link goes
+        bases=len(bases) if any(_uses_base(link.href) for link in collector.links) else 0,
     )
 
 

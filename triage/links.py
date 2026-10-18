@@ -4,6 +4,7 @@ the link open a web page at all."""
 import re
 
 from .domains import TAB_OR_NEWLINE, TEXT_URL, base_domain, decode_idn, domains_in_text, url_host
+from .html_reader import MAX_BASES
 from .link_wrappers import unwrap
 from .models import Check, ParsedEmail, Result, Strength, join_first_five
 
@@ -40,22 +41,30 @@ def check_link_mismatch(parsed: ParsedEmail) -> Check:
                 mismatches.append(f"text shows {shown_domain} but goes to {href_host}")
                 break
 
-    # A tag inside a domain is where CSS could change what the reader sees. On its own that
-    # makes the check inconclusive, and next to a mismatch it's a caveat.
+    # A tag inside a domain is where CSS could change what the reader sees, and past the limit
+    # some <base> tags weren't read. On their own they make the check inconclusive, and next to
+    # a mismatch they're caveats.
+    unsure = []
     split = list(dict.fromkeys(split))
-    split_text = (f"A tag sits in the middle of {join_first_five(split)}, where CSS could change what the reader "
-                  "sees. Check what the link looks like in a mail client, without clicking it.")
+    if split:
+        unsure.append(f"A tag sits in the middle of {join_first_five(split)}, where CSS could change what the "
+                      "reader sees. Check what the link looks like in a mail client, without clicking it.")
     caveats = []
+    if parsed.base_tags > MAX_BASES:
+        unsure.append(f"The HTML has {parsed.base_tags} different <base> tags, which set where links go. Links "
+                      f"were read against the first {MAX_BASES}. Check the rest by hand.")
+    elif parsed.base_tags > 1:
+        # Every reading was checked, but a flag may come from a base browsers skip
+        caveats.append(f"The HTML has {parsed.base_tags} different <base> tags, which set where links go. "
+                       "Browsers use one, so links were read against each.")
     if parsed.css_added_text:
         caveats.append('CSS adds text to what the email shows, so a link can show more than the tool reads. '
                        'See "Text added by CSS".')
 
     if mismatches:
-        if split:
-            caveats.insert(0, split_text)
-        return Check(name, Result.FLAG, strength, join_first_five(mismatches), caveats)
-    if split:
-        return Check(name, Result.INCONCLUSIVE, strength, split_text, caveats)
+        return Check(name, Result.FLAG, strength, join_first_five(mismatches), unsure + caveats)
+    if unsure:
+        return Check(name, Result.INCONCLUSIVE, strength, " ".join(unsure), caveats)
     return Check(name, Result.PASS, strength, "No link shows one domain and goes to another", caveats)
 
 

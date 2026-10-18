@@ -1,9 +1,11 @@
-"""Tests for triage/headers.py: SPF, DKIM, DMARC, Reply-To, Return-Path, and free webmail."""
+"""Tests for triage/headers.py: SPF, DKIM, DMARC, an ambiguous From, Reply-To, Return-Path, and free
+webmail."""
 
 import pytest
 
 from triage import headers
-from triage.headers import check_authentication, check_free_email, check_reply_to, check_return_path
+from triage.headers import (check_ambiguous_from, check_dkim, check_dmarc, check_free_email, check_reply_to,
+                            check_return_path, check_spf)
 from triage.impersonation import check_lookalike
 from triage.models import Check, ParsedEmail, Result
 from triage.parser import parse_bytes
@@ -17,12 +19,16 @@ def parse(*header_lines: str) -> ParsedEmail:
     return parse_bytes(raw.encode())
 
 
+def authentication(parsed: ParsedEmail) -> list[Check]:
+    return [check_spf(parsed), check_dkim(parsed), check_dmarc(parsed)]
+
+
 def authenticate(*auth_results: str, from_addr="service@paypal.com", signatures=(), extra=()) -> dict[str, Check]:
     # auth_results topmost first, the way providers stack them
     parsed = parse(*(f"Authentication-Results: {r}" for r in auth_results),
                    *(f"DKIM-Signature: {s}" for s in signatures),
                    f"From: {from_addr}", *extra)
-    return {check.name: check for check in check_authentication(parsed)}
+    return {check.name: check for check in authentication(parsed)}
 
 
 ALL_PASS = ("mx.google.com; dkim=pass header.i=@paypal.com header.s=s1 header.b=AbCd; "
@@ -37,7 +43,7 @@ def test_all_pass():
 
 
 def test_no_header_is_inconclusive():
-    checks = check_authentication(parse("From: service@paypal.com"))
+    checks = authentication(parse("From: service@paypal.com"))
     assert [c.result for c in checks] == [INCONCLUSIVE] * 3
     assert [c.evidence for c in checks] == ["Not reported (the email has no Authentication-Results header)"] * 3
 
@@ -236,6 +242,8 @@ def reply_to_check(*reply_tos: str, from_addr="Alice <alice@example.org>") -> Ch
     (("<>",), PASS),
     (("undisclosed-recipients:;",), PASS),
     (("<>, x@evil.net",), FLAG),
+    # A Reply-To the tool can't read doesn't hide the one before it
+    (("x@evil.net", "y@evil.net (Support"), FLAG),
 ])
 def test_reply_to(reply_tos, expected):
     assert reply_to_check(*reply_tos).result == expected
@@ -261,6 +269,63 @@ def test_reply_to_on_shared_domains(from_addr, reply_to, expected):
 def test_reply_to_from_a_subdomain_sender():
     # Compared by organization, so the subdomain can be on either side
     assert reply_to_check("help@example.org", from_addr="alice@mail.example.org").result == PASS
+
+
+ENCODED = "=?utf-8?q?x=40evil=2Enet?=@example.org"
+SHOWN = (f"{ENCODED} has encoded text in it, which isn't allowed in an address. Some mail clients decode it "
+         "and show x@evil.net@example.org")
+
+
+@pytest.mark.parametrize("reply_tos, result", [
+    (("alice@example.org", "alice@example.org"), PASS),
+    (("alice@example.org", "x@evil.net"), FLAG),
+])
+def test_several_reply_to_headers_are_a_caveat_on_any_result(reply_tos, result):
+    check = reply_to_check(*reply_tos)
+    assert (check.result, check.caveats) == (result, [
+        "The email has 2 Reply-To headers, where one is allowed. Which one a mail client uses isn't defined, "
+        "so the addresses in all of them were checked."])
+
+
+def test_encoded_reply_to_that_matches_as_written_is_inconclusive():
+    check = reply_to_check(ENCODED)
+    assert check.result == INCONCLUSIVE
+    assert check.evidence == f"Reply-To matches the sender (example.org) as written. {SHOWN}"
+
+
+@pytest.mark.parametrize("from_addr, result", [
+    # The address as written already goes elsewhere
+    ("Alice <alice@paypal.com>", FLAG),
+    # No From domain to compare against
+    ("undisclosed", INCONCLUSIVE),
+])
+def test_encoded_reply_to_is_a_caveat_when_it_already_has_a_result(from_addr, result):
+    check = reply_to_check(ENCODED, from_addr=from_addr)
+    assert (check.result, check.caveats) == (result, [f"{SHOWN}."])
+
+
+@pytest.mark.parametrize("from_lines, evidence", [
+    (("From: service@paypal.com", "From: x@evil.com"),
+     "2 From headers (service@paypal.com; x@evil.com). Mail clients and DMARC checks don't always use the "
+     "same one"),
+    (("From: service@paypal.com, x@evil.com",),
+     "From has 2 addresses (service@paypal.com; x@evil.com). Mail clients and DMARC checks don't always use "
+     "the same one"),
+    # Both findings are given, not just the first
+    ((f"From: alice@example.org, {ENCODED}",),
+     f"From has 2 addresses (alice@example.org; {ENCODED}). Mail clients and DMARC checks don't always use "
+     f"the same one. {SHOWN}"),
+    ((f"From: {ENCODED}",), SHOWN),
+    # Neither From has an address to list
+    (("From: <>", "From: <>"), "2 From headers. Mail clients and DMARC checks don't always use the same one"),
+])
+def test_ambiguous_from(from_lines, evidence):
+    assert check_ambiguous_from(parse(*from_lines)) == [
+        Check("Ambiguous From", FLAG, "strong", evidence)]
+
+
+def test_one_plain_from_isnt_listed():
+    assert check_ambiguous_from(parse("From: PayPal <service@paypal.com>")) == []
 
 
 def test_reply_to_without_a_from_domain_is_inconclusive():
