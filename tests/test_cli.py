@@ -21,8 +21,8 @@ from triage.__main__ import main
 from triage.models import LookupStatus, Reputation
 
 FIXTURES = Path(__file__).parent / "fixtures"
-# Ambiguous From, Hidden text, Image only and Text added by CSS are left out, since they're
-# only listed when they find something
+# Ambiguous From, Google redirect, Hidden text, Image only and Text added by CSS are left out,
+# since they're only listed when they find something
 CHECK_NAMES = ["SPF", "DKIM", "DMARC", "Reply-To", "Return-Path domain", "Display name", "Free webmail sender",
                "Lookalike domain", "Brand joined to a word", "Link text vs destination", "Script, file or app link"]
 

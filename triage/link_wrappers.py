@@ -51,6 +51,13 @@ def destinations(url: str, depth: int = MAX_WRAPPERS) -> list[str]:
     return sorted({place for link in links for place in destinations(link, depth - 1)})
 
 
+def through_google(url: str) -> bool:
+    # Whether the sender put a link behind Google's redirect, even when Safe Links or
+    # Proofpoint wrapped it again on the way in
+    inner = unwrap(url, redirects=False)
+    return url_host(inner) in GOOGLE and bool(_inner_links(inner, redirects=True))
+
+
 def _inner_links(url: str, redirects: bool) -> set[str]:
     # The links a wrapper names, or none when it isn't one
     host = url_host(url)

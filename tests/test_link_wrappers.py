@@ -5,7 +5,7 @@ from urllib.parse import quote
 
 import pytest
 
-from triage.link_wrappers import MAX_WRAPPERS, destinations, unwrap
+from triage.link_wrappers import MAX_WRAPPERS, destinations, through_google, unwrap
 
 # The recipient's address is in data=, the way Safe Links writes it
 SAFE_LINK = ("https://nam02.safelinks.protection.outlook.com/?url=https%3A%2F%2Fevil.com%2Flogin%3Fid%3D1"
@@ -109,3 +109,20 @@ def test_wrapping_is_read_only_so_deep():
     for _ in range(MAX_WRAPPERS + 1):
         url = "https://www.google.com/url?q=" + quote(url, safe="")
     assert unwrap(url) == "https://www.google.com/url?q=https%3A%2F%2Fevil.com%2F"
+
+
+GOOGLE = "https://www.google.com/url?q=https://evil.com/&sa=D"
+
+
+@pytest.mark.parametrize("url, through", [
+    (GOOGLE, True),
+    # The sender's redirect, wrapped again by the reader's Safe Links
+    ("https://nam02.safelinks.protection.outlook.com/?url=" + quote(GOOGLE, safe="") + "&data=x", True),
+    ("https://www.google.com/url?q=https://www.paypal.com/&url=https://evil.com/", True),
+    (SAFE_LINK, False),
+    ("https://www.google.com/url?q=phishing+triage", False),
+    ("https://www.google.com.evil.com/url?q=https://evil.com/", False),
+    ("https://evil.com/", False),
+], ids=["Google", "inside Safe Links", "two links", "Safe Links", "a search", "lookalike host", "not wrapped"])
+def test_links_put_behind_googles_redirect(url, through):
+    assert through_google(url) == through

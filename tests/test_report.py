@@ -194,6 +194,21 @@ def test_the_sender_header_is_shown():
     assert json.loads(render_json(report))["email"]["sender"] == [{"name": "Lists", "address": "list@example.net"}]
 
 
+def test_a_pattern_is_shown_when_one_matches():
+    report = report_of([Check("DMARC", "pass", "strong", ""),
+                        Check("Lookalike domain", "flag", "strong", "", domains=["paypa1.com"])],
+                       from_addrs=[Address("", "a@paypa1.com", "paypa1.com")])
+    name, why = report.patterns[0].name, report.patterns[0].why
+    assert section(render_text(report), "Patterns") == [f"  {name} (DMARC; Lookalike domain): {why}"]
+    note = render_markdown(report)
+    assert [line for line in note.splitlines() if line.startswith("## ")][:3] == ["## Summary", "## Patterns",
+                                                                                  "## Signals"]
+    assert note_section(note, "## Patterns") == [f"- **{name}** (DMARC; Lookalike domain): {why}"]
+    assert json.loads(render_json(report))["patterns"] == [
+        {"name": name, "found": ["DMARC", "Lookalike domain"], "why": why}]
+    assert render_summary(report, []).splitlines()[-1] == f"Patterns: {name}"
+
+
 def test_a_missing_subject_or_file_name_isnt_shown_as_the_emails_text():
     report = report_of(subject="", attachments=[Attachment("", "application/pdf", 5, "f" * 64)])
     text, note = render_text(report), render_markdown(report)
@@ -261,6 +276,7 @@ def test_the_json_holds_the_same_report():
 def test_json_for_alert_text():
     data = json.loads(render_json(build_text_report(Indicators(domains=["evil.com"]), {})))
     assert (data["email"], data["origin"], data["checks"], data["follow_ups"]) == (None, None, [], [])
+    assert data["patterns"] == []
 
 
 def test_the_short_summary():

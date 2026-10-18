@@ -1,5 +1,5 @@
-"""Checks on links in the body: does the text show the same domain the link goes to, and does
-the link open a web page at all."""
+"""Checks on links in the body: does the text show the same domain the link goes to, does the
+link open a web page at all, and was it put behind Google's redirect."""
 
 import re
 
@@ -100,6 +100,17 @@ def check_link_type(parsed: ParsedEmail) -> Check:
     if found:
         return Check(name, Result.FLAG, strength, join_first_five(list(dict.fromkeys(found))))
     return Check(name, Result.PASS, strength, "Every link opens a web page or an email")
+
+
+def check_google_redirect(parsed: ParsedEmail) -> list[Check]:
+    # Phishing puts links behind Google's redirect so a filter reading the host sees google.com.
+    # Weak, since Google's own mail, like Calendar invitations, does it too.
+    hosts = list(dict.fromkeys(url_host(link.href) or link.href for link in parsed.links if link.through_google))
+    if not hosts:
+        return []
+    return [Check("Google redirect", Result.FLAG, Strength.WEAK,
+                  f"Google's redirect page sends links on to {join_first_five(hosts)}, so a filter that "
+                  "reads where a link points sees google.com")]
 
 
 def _scheme(href: str) -> str:

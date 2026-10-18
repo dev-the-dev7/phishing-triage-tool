@@ -9,7 +9,7 @@ from email.utils import getaddresses
 from .domains import urls_in_text
 from .html_reader import read_html
 from .iocs import defang
-from .link_wrappers import destinations
+from .link_wrappers import destinations, through_google
 from .models import Address, Attachment, Link, ParsedEmail, join_first_five
 
 # Microsoft 365's largest allowed message. A bigger file isn't a real email, and the
@@ -81,7 +81,8 @@ def _parse_message(raw: bytes) -> ParsedEmail:
     # wrapper naming two different links becomes a link to each, so every check sees both.
     places = [destinations(link.href) for link in links]
     warnings += _unclear_link_warnings(places)
-    links = [replace(link, href=href) for link, hrefs in zip(links, places) for href in hrefs]
+    links = [replace(link, href=href, through_google=through_google(link.href))
+             for link, hrefs in zip(links, places) for href in hrefs]
 
     return ParsedEmail(
         from_addrs=from_addrs,

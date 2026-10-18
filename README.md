@@ -15,8 +15,9 @@ Work in progress. What works now, with `python -m triage path/to/email.eml`:
 - Link text that shows one domain but goes to another, and links that run a script or
   open a file share or another program
 - Links rewritten by Microsoft's Safe Links, Proofpoint, or Google's redirect, read as where
-  they really go
+  they really go, with a weak flag for a link the sender put behind Google's redirect
 - Text hidden inside words, emails that are only an image, and text added by CSS
+- Named patterns that combine findings, like a lookalike domain that passes DMARC
 - The server that handed the email to your provider, found from the Received headers
 - Indicators (URLs, domains, IPs, email addresses, hashes), defanged for sharing. From an
   email, or from alert text with `python -m triage --text alert.txt` (`-` reads standard
@@ -26,7 +27,8 @@ Work in progress. What works now, with `python -m triage path/to/email.eml`:
   registered in the last 30 days and for hops faked as Microsoft's servers
 - Updating the tool's copy of the Public Suffix List with `python -m triage.update_suffixes`
 - A report in the terminal: a summary with the strongest flag and the count of each
-  result, the email's details and origin, every check with flags first, and the indicators
+  result, any patterns, the email's details and origin, every check with flags first, and
+  the indicators
 - A Markdown triage note to paste into a ticket with `--out note.md`, and the same report
   as JSON for other tools with `--json report.json`. With either, the terminal shows a
   short summary. `-` prints one instead of writing a file, for a pipe, and the summary
@@ -49,8 +51,6 @@ python -m triage data\reported.eml --out - | Set-Clipboard
 
 Planned:
 
-- Named patterns that combine findings, and notes on what an email asks for (gift cards,
-  bank details, secrecy)
 - `--expect` for the brand the reporter says the email claims to be from
 
 ## Setting up the lookups
@@ -110,6 +110,14 @@ includes the company's root certificate.
   isn't a score: two weak flags don't add up to a medium one, since they can be the same
   fact seen twice.
 
+- **Patterns name findings that mean more together than apart**, each with a line on why.
+  A lookalike domain that passes DMARC or DKIM only shows the attacker set up their own
+  domain. An authenticated sender with a lookalike link may be a hacked account, which
+  changes who to tell and what to block. Each is made from findings about different
+  facts, since one lookalike domain tripping three checks is still one fact. A pattern
+  never changes a check's result, and the section only appears when one matches, since "no
+  patterns" would read as reassurance.
+
 - **Text from the email can't change how the report looks.** Control, invisible, and
   line-breaking characters are shown as codes: terminal codes could rewrite lines above, a
   newline or line separator in an encoded Subject could add a fake result line, and a
@@ -121,10 +129,10 @@ includes the company's root certificate.
   `PayPal" <service@paypal.com>` can't pass for the address. The same goes for text from
   the lookup services, like a network's name.
 
-- **The note is written for a ticket.** It follows the usual triage note: a summary, the
-  flags with their evidence, what was inconclusive or passed, the indicators, typical
-  follow-ups worded as suggestions, and blank fields for the analyst's verdict and actions,
-  which the tool never fills in. Every value from the email or a lookup is in a code span
+- **The note is written for a ticket.** It follows the usual triage note: a summary, any
+  patterns, the flags with their evidence, what was inconclusive or passed, the indicators,
+  typical follow-ups worded as suggestions, and blank fields for the analyst's verdict and
+  actions, which the tool never fills in. Every value from the email or a lookup is in a code span
   and defanged, so it can't make a link, an image, or formatting, whether the ticket
   system reads Markdown or not. That includes the Message-ID and addresses, which have to
   be refanged before searching for them.
@@ -272,6 +280,12 @@ includes the company's root certificate.
   shown in the text was the sender's choice, so the reader sees google.com, and the link
   check flags it.
 
+- **A link the sender put behind Google's redirect is a weak flag**, even when Safe Links
+  or Proofpoint wrapped it again on the way in, since a filter that judges a link by where
+  it points sees google.com. It's weak because Google's own mail, like Calendar
+  invitations, sends links through it too. Like the content checks, it's only listed when
+  it finds one.
+
 - **A link's text is read with and without the parts a browser hides.**
   `paypal<span style="font-size:0"> </span>.com` shows paypal.com, but read as written it's
   "paypal .com", which isn't a domain, so a hidden space would make the link check pass.
@@ -320,9 +334,14 @@ includes the company's root certificate.
 
 - **These content checks only appear when they find something.** An email with no hidden
   text isn't safer for it, so a pass would read as reassurance the check can't give.
-  There's no check on wording like "urgent" or "verify your account": real work email is
-  full of it, so it would flag half the inbox, and a pass for calm wording would be false
-  comfort.
+
+- **What the email says is left to the analyst.** There's no check on wording like
+  "urgent" or "verify your account", or on what the email asks for, like gift cards or a
+  bank transfer. The analyst reads the body anyway, and a list of phrases only knows
+  English, misses a request worded another way, and flags ordinary mail: real work email
+  is full of urgency, and invoices ask for bank transfers. The checks are for what the
+  reader can't see, can't easily check, or can only see by linking it to something else,
+  like where a link really goes or who owns an IP.
 
 ### Indicators
 

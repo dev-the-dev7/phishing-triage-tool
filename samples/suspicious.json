@@ -57,6 +57,7 @@
     "indicators": 11,
     "warnings": 0
   },
+  "patterns": [],
   "checks": [
     {
       "name": "DMARC",

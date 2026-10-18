@@ -12,6 +12,7 @@ from .enrich import network
 from .iocs import defang, defang_text
 from .models import (Address, Attachment, Check, Indicators, LookupStatus, Origin, ParsedEmail, Reputation, Result,
                      Strength, join_first_five)
+from .patterns import Pattern, find_patterns
 
 # Text from an email can be any length (a Subject can be 260 KB), so what's shown is cut
 MAX_VALUE_CHARS = 300
@@ -72,6 +73,7 @@ class Report:
     indicators: list[IndicatorRow]
     not_looked_up: list[NotLookedUp]
     warnings: list[str]  # about the tool's reading of the email, not the email itself
+    patterns: list[Pattern] = field(default_factory=list)
 
     @property
     def strongest_flag(self) -> Strength | None:
@@ -91,7 +93,8 @@ def build_report(parsed: ParsedEmail, origin: Origin | None, checks: list[Check]
              if ip not in found.ips}
     indicators, not_looked_up = _indicator_rows(found, results, named)
     origin_network = _network(results.get(origin.ip, [])) if origin and origin.ip else ""
-    return Report(email, origin, origin_network, findings, indicators, not_looked_up, warnings)
+    return Report(email, origin, origin_network, findings, indicators, not_looked_up, warnings,
+                  find_patterns(parsed, findings))
 
 
 def build_text_report(found: Indicators, results: dict[str, list[Reputation]]) -> Report:
@@ -129,7 +132,10 @@ def render_text(report: Report) -> str:
     lines = [_title(report, _shown), ""]
     if report.email:
         lines += ["Summary", f"  Strongest flag: {report.strongest_flag or 'none'}", f"  {'   '.join(_counts(report))}",
-                  "", "Email", *_email_lines(report), "",
+                  ""]
+        if report.patterns:
+            lines += ["Patterns", *(f"  {p.name} ({'; '.join(p.found)}): {p.why}" for p in report.patterns), ""]
+        lines += ["Email", *_email_lines(report), "",
                   "Findings", *(line for check in report.findings for line in _check_lines(check)), ""]
     lines += ["Indicators, defanged", *_indicator_lines(report)]
     if report.warnings:
@@ -142,6 +148,8 @@ def render_summary(report: Report, written: list[str]) -> str:
     lines = [_title(report, _shown)]
     if report.email:
         lines += [f"Strongest flag: {report.strongest_flag or 'none'}", "   ".join(_counts(report))]
+        if report.patterns:
+            lines.append(f"Patterns: {'; '.join(p.name for p in report.patterns)}")
     else:
         lines.append(f"Indicators: {len(report.indicators)}")
     lines += [_missed_line(missed) for missed in report.not_looked_up]
@@ -243,7 +251,11 @@ def render_markdown(report: Report) -> str:
     lines = [f"# {_title(report, _md)}", ""]
     if report.email:
         lines += ["## Summary", "", f"Strongest flag: {report.strongest_flag or 'none'}. {'. '.join(_counts(report))}.",
-                  "", *_md_email(report), "", *_md_findings(report)]
+                  "", *_md_email(report), ""]
+        if report.patterns:
+            lines += ["## Patterns", "", *(f"- **{p.name}** ({'; '.join(p.found)}): {p.why}" for p in report.patterns),
+                      ""]
+        lines += _md_findings(report)
     lines += ["## Indicators", "", *_md_indicators(report), ""]
     if report.warnings:
         lines += ["## Warnings about the tool's reading", "",
@@ -361,6 +373,7 @@ def render_json(report: Report) -> str:
             "passed": sum(c.result == Result.PASS for c in report.findings),
             "indicators": len(report.indicators), "warnings": len(report.warnings),
         },
+        "patterns": [{"name": p.name, "found": p.found, "why": p.why} for p in report.patterns],
         "checks": [{"name": c.name, "result": c.result, "strength": c.strength, "evidence": c.evidence,
                     "caveats": c.caveats} for c in report.findings],
         "indicators": [{"type": row.kind, "value": row.value, "defanged": defang(row.value),

@@ -27,6 +27,7 @@ class Link:
     # Domains in the text with a tag in the middle (pay<b>pal</b>.com), where CSS the tool
     # doesn't read could change what the reader sees
     split_domains: list[str] = field(default_factory=list)
+    through_google: bool = False  # it went through Google's redirect page to get to href
 
 
 @dataclass

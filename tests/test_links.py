@@ -8,7 +8,7 @@ import pytest
 from triage import html_reader
 from triage.impersonation import check_lookalike
 from triage.iocs import from_email
-from triage.links import check_link_mismatch, check_link_type
+from triage.links import check_google_redirect, check_link_mismatch, check_link_type
 from triage.models import Check, Link, ParsedEmail, Result
 from triage.parser import parse_bytes
 
@@ -304,6 +304,16 @@ def test_many_wrappers_naming_two_links_give_one_warning():
 def test_a_google_redirect_shown_in_text_flags():
     parsed = parse_bytes((HEADERS + "\r\nSign in at https://www.google.com/url?q=https://evil.com/login today").encode())
     assert check_link_mismatch(parsed).evidence == "text shows www.google.com but goes to evil.com"
+
+
+def test_a_link_behind_googles_redirect_flags():
+    parsed = html_email('<a href="https://www.google.com/url?q=https://www.paypal.com/&amp;url=https://evil.com/">'
+                        'Click here</a><a href="https://www.example.com/">example.com</a>')
+    assert [link.through_google for link in parsed.links] == [True, True, False]
+    assert check_google_redirect(parsed) == [Check(
+        "Google redirect", "flag", "weak", "Google's redirect page sends links on to evil.com; www.paypal.com, so a "
+        "filter that reads where a link points sees google.com")]
+    assert check_google_redirect(html_email('<a href="https://www.example.com/">example.com</a>')) == []
 
 
 def test_a_lookalike_behind_a_wrapper_is_found():
