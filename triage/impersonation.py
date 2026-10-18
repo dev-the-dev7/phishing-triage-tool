@@ -162,10 +162,11 @@ def _main_domain(target: str, target_domains: list[str]) -> str:
 
 
 def _unlisted_domains(parsed: ParsedEmail) -> list[tuple[str, str, str]]:
-    # Sender and link domains that aren't a target's or free webmail, as (label, domain as
-    # displayed, base domain). Links matter, since mail from a hacked account has a normal sender.
+    # The From, Sender, Reply-To and link domains that aren't a target's or free webmail, as
+    # (label, domain as displayed, base domain). Links matter, since mail from a hacked account
+    # comes from a normal address.
     found_in = {}
-    for a in [*parsed.from_addrs, *parsed.reply_to]:
+    for a in [*parsed.from_addrs, *parsed.sender, *parsed.reply_to]:
         if a.domain:
             found_in.setdefault(a.domain, set()).add("sender")
     for link in parsed.links:

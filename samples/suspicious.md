@@ -52,7 +52,7 @@ Suggestions, not actions taken:
 
 - Find other recipients of the same message (search by its Message-ID or sender)
   - Message-ID: `<20261005161418[.]4417[@]paypa1[.]com>`
-  - Sender: `security[@]paypa1[.]com`
+  - From: `security[@]paypa1[.]com`
 - Check whether anyone clicked a link (proxy or DNS logs for the indicator domains) or replied
 - Block the attacker's own sender address and domains, not spoofed or shared ones like a webmail or link-shortening service
 

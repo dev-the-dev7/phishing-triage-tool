@@ -7,7 +7,7 @@ import pytest
 
 from triage import parser
 from triage.impersonation import check_display_name
-from triage.models import ParsedEmail, Result
+from triage.models import Address, ParsedEmail, Result
 from triage.parser import parse_bytes, parse_file
 
 UNREADABLE = "has an address the tool couldn't read safely"
@@ -190,7 +190,7 @@ def test_address_with_encoded_word_characters_isnt_decoded():
     assert parsed.from_addrs[0].decoded == ""
 
 
-@pytest.mark.parametrize("header", ["To", "Return-Path"])
+@pytest.mark.parametrize("header", ["To", "Sender", "Return-Path"])
 def test_encoded_text_where_no_check_reads_it_warns(header):
     raw = f"From: a@example.org\r\n{header}: =?utf-8?q?service=40paypal=2Ecom?=@evil.com\r\n\r\nHello"
     assert parse_bytes(raw.encode()).parse_warnings == [
@@ -270,7 +270,7 @@ def test_reply_to_headers_are_counted():
     assert parsed.parse_warnings == []
 
 
-@pytest.mark.parametrize("name", ["From", "Reply-To"])
+@pytest.mark.parametrize("name", ["From", "Sender", "Reply-To"])
 @pytest.mark.parametrize("broken", [
     "y@evil.net (Support",
     # Neither parse finds an address in it, and the header before it has one
@@ -280,7 +280,8 @@ def test_a_header_the_tool_cant_read_doesnt_hide_the_others(name, broken):
     # Read together, the strict parser drops every address when one header is broken, so a
     # junk second header could hide the real first one
     parsed = parse(f"{name}: x@evil.net", f"{name}: {broken}")
-    assert [a.email for a in (parsed.from_addrs if name == "From" else parsed.reply_to)] == ["x@evil.net"]
+    found = {"From": parsed.from_addrs, "Sender": parsed.sender, "Reply-To": parsed.reply_to}[name]
+    assert [a.email for a in found] == ["x@evil.net"]
     assert parsed.parse_warnings == [f"{name} {UNREADABLE}. Check the header by hand."]
 
 
@@ -290,9 +291,19 @@ def test_to_date_and_message_id():
     assert (parsed.date, parsed.message_id) == ("Tue, 06 Oct 2026 10:00:00 +0000", "<abc@example.org>")
 
 
+@pytest.mark.parametrize("sender_lines", [
+    ("Sender: Lists <list@example.net>", "Sender: x@evil.com"),
+    ("Sender: Lists <list@example.net>, x@evil.com",),
+])
+def test_every_sender_address_is_kept(sender_lines):
+    # One is allowed, but a second could otherwise hide from the analyst
+    assert parse("From: a@example.org", *sender_lines).sender == [
+        Address("Lists", "list@example.net", "example.net"), Address("", "x@evil.com", "evil.com")]
+
+
 def test_missing_headers_are_empty():
     parsed = parse("From: a@example.org")
-    assert (parsed.subject, parsed.date, parsed.message_id) == ("", "", "")
+    assert (parsed.subject, parsed.date, parsed.message_id, parsed.sender) == ("", "", "", [])
 
 
 INNER_EMAIL = ("From: x@evil.com\r\nSubject: Your account\r\nContent-Type: text/html\r\n\r\n"

@@ -111,6 +111,7 @@ class Origin:
 class ParsedEmail:
     from_addrs: list[Address] = field(default_factory=list)  # from every From header, in order
     from_headers: int = 0
+    sender: list[Address] = field(default_factory=list)  # Outlook shows it as "Sender on behalf of From"
     reply_to: list[Address] = field(default_factory=list)
     reply_to_headers: int = 0
     return_path: Address | None = None

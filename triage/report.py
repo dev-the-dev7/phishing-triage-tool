@@ -36,6 +36,7 @@ JSON_FORMAT = 1
 @dataclass
 class EmailFacts:
     from_addrs: list[Address]
+    sender: list[Address]
     to: list[Address]
     reply_to: list[Address]
     return_path: Address | None
@@ -80,8 +81,8 @@ class Report:
 
 def build_report(parsed: ParsedEmail, origin: Origin | None, checks: list[Check], found: Indicators,
                  results: dict[str, list[Reputation]], warnings: list[str]) -> Report:
-    email = EmailFacts(parsed.from_addrs, parsed.to, parsed.reply_to, parsed.return_path, parsed.subject, parsed.date,
-                       parsed.message_id, len(parsed.links), parsed.attachments)
+    email = EmailFacts(parsed.from_addrs, parsed.sender, parsed.to, parsed.reply_to, parsed.return_path, parsed.subject,
+                       parsed.date, parsed.message_id, len(parsed.links), parsed.attachments)
     # sorted() keeps the checks' own order within a result and strength
     findings = sorted(checks, key=lambda check: (RESULT_ORDER.index(check.result),
                                                  STRENGTH_ORDER.index(check.strength)))
@@ -189,7 +190,7 @@ def _file_name(attachment: Attachment, shown) -> str:
 
 
 def _address_fields(email: EmailFacts) -> list[tuple[str, list[Address]]]:
-    fields = [("From", email.from_addrs), ("To", email.to), ("Reply-To", email.reply_to),
+    fields = [("From", email.from_addrs), ("Sender", email.sender), ("To", email.to), ("Reply-To", email.reply_to),
               ("Return-Path", [email.return_path])]
     return [(label, addresses) for label, addresses in fields if addresses and addresses[0]]
 
@@ -315,8 +316,9 @@ def _md_follow_ups(report: Report) -> list[str]:
     lines = [f"- {find}"]
     if report.email.message_id:
         lines.append(f"  - Message-ID: {_md(report.email.message_id)}")
-    if report.email.from_addrs:
-        lines.append(f"  - Sender: {join_first_five([_md(a.email) for a in report.email.from_addrs])}")
+    for label, addresses in (("From", report.email.from_addrs), ("Sender", report.email.sender)):
+        if addresses:
+            lines.append(f"  - {label}: {join_first_five([_md(a.email) for a in addresses])}")
     return lines + [f"- {suggestion}" for suggestion in rest]
 
 
@@ -340,7 +342,8 @@ def render_json(report: Report) -> str:
     data = {
         "format": JSON_FORMAT,
         "email": None if email is None else {
-            "from": list(map(_json_address, email.from_addrs)), "to": list(map(_json_address, email.to)),
+            "from": list(map(_json_address, email.from_addrs)), "sender": list(map(_json_address, email.sender)),
+            "to": list(map(_json_address, email.to)),
             "reply_to": list(map(_json_address, email.reply_to)), "return_path": _json_address(email.return_path),
             "subject": email.subject, "date": email.date, "message_id": email.message_id, "link_count": email.links,
             "attachments": [{"filename": a.filename, "content_type": a.content_type, "size": a.size,

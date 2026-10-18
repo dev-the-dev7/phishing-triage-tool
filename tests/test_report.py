@@ -158,7 +158,7 @@ def test_the_note_follows_the_guide():
     assert note_section(note, "## Passed") == ["SPF; Script, file or app link",
                                                "- Caveat on **Script, file or app link**: `d`"]
     assert note_section(note, "## Typical follow-ups if confirmed malicious")[2:4] == [
-        "  - Message-ID: `<1[@]paypa1[.]com>`", "  - Sender: `a[@]paypa1[.]com`"]
+        "  - Message-ID: `<1[@]paypa1[.]com>`", "  - From: `a[@]paypa1[.]com`"]
     assert note_section(note, "## Analyst decision") == ["- Verdict:", "- Actions taken:"]
 
 
@@ -177,10 +177,21 @@ def test_every_from_address_is_shown():
     assert section(render_text(report), "Email")[0] == "  From:        a@example.org; x@evil.com"
     note = render_markdown(report)
     assert note_section(note, "## Summary")[1] == "- From: `a[@]example[.]org`; `x[@]evil[.]com`"
-    assert "  - Sender: `a[@]example[.]org`; `x[@]evil[.]com`" in note_section(
+    assert "  - From: `a[@]example[.]org`; `x[@]evil[.]com`" in note_section(
         note, "## Typical follow-ups if confirmed malicious")
     assert json.loads(render_json(report))["email"]["from"] == [{"name": "", "address": "a@example.org"},
                                                                {"name": "", "address": "x@evil.com"}]
+
+
+def test_the_sender_header_is_shown():
+    # Outlook shows it next to the From, and it can be the account that really sent the email
+    report = report_of(sender=[Address("Lists", "list@example.net", "example.net")])
+    assert section(render_text(report), "Email")[1] == '  Sender:      "Lists" <list@example.net>'
+    note = render_markdown(report)
+    assert note_section(note, "## Summary")[2] == '- Sender: `"Lists" <list[@]example[.]net>`'
+    assert note_section(note, "## Typical follow-ups if confirmed malicious")[2:4] == [
+        "  - From: `a[@]example[.]org`", "  - Sender: `list[@]example[.]net`"]
+    assert json.loads(render_json(report))["email"]["sender"] == [{"name": "Lists", "address": "list@example.net"}]
 
 
 def test_a_missing_subject_or_file_name_isnt_shown_as_the_emails_text():

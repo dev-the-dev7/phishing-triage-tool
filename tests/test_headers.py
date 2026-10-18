@@ -309,12 +309,16 @@ def test_encoded_reply_to_is_a_caveat_when_it_already_has_a_result(from_addr, re
      "2 From headers (service@paypal.com; x@evil.com). Mail clients and DMARC checks don't always use the "
      "same one"),
     (("From: service@paypal.com, x@evil.com",),
+     "From has 2 addresses (service@paypal.com; x@evil.com), and no Sender header names who sent it. Mail "
+     "clients and DMARC checks don't always use the same one"),
+    # Several authors the way the standard allows, which mail clients can still show either way
+    (("From: service@paypal.com, x@evil.com", "Sender: x@evil.com"),
      "From has 2 addresses (service@paypal.com; x@evil.com). Mail clients and DMARC checks don't always use "
      "the same one"),
     # Both findings are given, not just the first
     ((f"From: alice@example.org, {ENCODED}",),
-     f"From has 2 addresses (alice@example.org; {ENCODED}). Mail clients and DMARC checks don't always use "
-     f"the same one. {SHOWN}"),
+     f"From has 2 addresses (alice@example.org; {ENCODED}), and no Sender header names who sent it. Mail "
+     f"clients and DMARC checks don't always use the same one. {SHOWN}"),
     ((f"From: {ENCODED}",), SHOWN),
     # Neither From has an address to list
     (("From: <>", "From: <>"), "2 From headers. Mail clients and DMARC checks don't always use the same one"),
@@ -339,6 +343,12 @@ def test_no_reply_to_passes_without_a_from_domain():
 
 def test_lookalike_in_a_second_reply_to_is_checked():
     parsed = parse("From: alice@example.org", "Reply-To: alice@example.org", "Reply-To: x@paypa1.com")
+    assert "paypa1.com [sender]" in check_lookalike(parsed).evidence
+
+
+def test_lookalike_in_a_second_sender_header_is_checked():
+    # Outlook shows the Sender next to the From
+    parsed = parse("From: alice@example.org", "Sender: alice@example.org", "Sender: x@paypa1.com")
     assert "paypa1.com [sender]" in check_lookalike(parsed).evidence
 
 

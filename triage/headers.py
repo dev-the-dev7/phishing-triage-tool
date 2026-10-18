@@ -173,14 +173,16 @@ def _parse_auth_results(header: str) -> tuple[str, dict[str, list[tuple[str, str
 def check_ambiguous_from(parsed: ParsedEmail) -> list[Check]:
     # Ways to make a mail client show a different From than the one DMARC checked. Only listed
     # when found, since real mail almost never does this.
-    found, count = [], ""
+    found, count, no_sender = [], "", ""
     if parsed.from_headers > 1:
         count = f"{parsed.from_headers} From headers"
     elif len(parsed.from_addrs) > 1:
         count = f"From has {len(parsed.from_addrs)} addresses"
+        # The standard allows several authors only with a Sender header naming who sent it
+        no_sender = "" if parsed.sender else ", and no Sender header names who sent it"
     if count:
         listed = f" ({join_first_five([a.email for a in parsed.from_addrs])})" if parsed.from_addrs else ""
-        found.append(f"{count}{listed}. Mail clients and DMARC checks don't always use the same one")
+        found.append(f"{count}{listed}{no_sender}. Mail clients and DMARC checks don't always use the same one")
     found += [_encoded(a) for a in parsed.from_addrs if a.decoded]
     if not found:
         return []

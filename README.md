@@ -182,6 +182,15 @@ includes the company's root certificate.
   since comparing thousands with every Reply-To would take minutes, so those checks can't
   pass.
 
+- **The Sender header is shown and its domain checked, but it isn't compared with the
+  From.** Outlook shows it as "Sender on behalf of From", and it can name the account that
+  really sent the email. Mailing lists and assistants set it on ordinary mail, though, and
+  DMARC doesn't read it, so a Sender that isn't the From isn't flagged. It's listed as an
+  indicator, and the lookalike checks read its domain. Only one is allowed, but like From
+  and Reply-To, every Sender header in the email is read. When From has several addresses,
+  the standard requires a Sender header naming who sent it, and Ambiguous From says when
+  there isn't one.
+
 - **Encoded text is only decoded where it's allowed.** Python's email library decodes
   `=?utf-8?q?...?=` encoded words anywhere in a header, but they're only allowed in plain
   text like the Subject and display names. Received, Authentication-Results, and
@@ -191,7 +200,7 @@ includes the company's root certificate.
   are read as written, along with what mail clients hit by the Mailsploit bugs display
   instead. In the From address that's a flag, and in a Reply-To that otherwise matches the
   sender it makes the check inconclusive, since such a client may reply to what it shows.
-  In To or Return-Path it's a warning.
+  In To, Sender, or Return-Path it's a warning.
 
 - **The originating server comes from the receiver's reverse DNS lookup, not the name the
   sender claims.** The sender can claim to be `mx.google.com`. The reverse DNS name is
