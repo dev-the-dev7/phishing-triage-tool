@@ -28,6 +28,8 @@ def lists_as_shipped(monkeypatch):
     monkeypatch.setattr(impersonation, "OWN_DOMAINS", [])
     monkeypatch.setattr(impersonation, "EXECUTIVES", set())
     monkeypatch.setattr(enrich, "OWN_DOMAINS", [])
+    # Names you add to ALLOWED_NAMES would change what the tests expect, so they get the shipped ones
+    monkeypatch.setattr(impersonation, "ALLOWED_NAMES", {"mega", "metadata"})
 
 
 class FakeTime:

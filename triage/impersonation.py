@@ -2,20 +2,26 @@
 
 import functools
 import re
+from pathlib import Path
 
 from .domains import (base_domain, decode_idn, is_ip, lookalike_forms, normalize_unicode,
                       registered_name, url_host)
-from .lists import BRANDS, EXECUTIVES, FREE_EMAIL_DOMAINS, OWN_DOMAINS, OWN_NAMES
+from .lists import ALLOWED_NAMES, BRANDS, EXECUTIVES, FREE_EMAIL_DOMAINS, JOIN_WORDS, OWN_DOMAINS, OWN_NAMES
 from .models import Address, Check, ParsedEmail, Result, Strength, for_each_from, join_first_five
 
-# Shorter brand names are one letter from common words (apple/apply) and sit inside others
-# (pineapple), so they skip the joined check and are only typo-checked on the registered
-# name. A subdomain is free, so a phisher would write the real name there, not a typo.
+# Shorter brand names are one letter from ordinary words (apple: apply) and sit inside others
+# (pineapple), so an English word list decides what a typo or joined word means. They're
+# only typo-checked on the registered name, since a subdomain is free and a phisher would
+# write the real name there.
 LONG_NAME_LENGTH = 6
 
-# Shorter names aren't typo-checked, since nearly every short word is one letter from another
-# (meta: beta, mega). They're still caught spelled right or with lookalikes (m3ta.com).
-MIN_TYPO_LENGTH = 5
+# Shorter names aren't typo-checked or looked for inside words, since one letter from them,
+# or a word holding them, is almost any short label (ibm: ibn, ibmx). They're still caught
+# spelled right or with lookalikes.
+MIN_NAME_LENGTH = 4
+
+# ENABLE, an English word list in the public domain
+WORDS_FILE = Path(__file__).with_name("english_words.txt")
 
 
 def check_display_name(parsed: ParsedEmail) -> Check:
@@ -69,7 +75,7 @@ def _check_display_name(from_addr: Address | None) -> Check:
 
 def check_lookalike(parsed: ParsedEmail) -> Check:
     name, strength = "Lookalike domain", Strength.STRONG
-    hits, flagged = [], []
+    hits, unsure, flagged = [], [], []
     targets = [(target, domains, _main_domain(target, domains)) for target, domains in _impersonation_targets()]
     # A word more than one letter longer than every name can't equal one or be a typo of one
     max_length = max(len(form) for t, _, _ in targets for form in _name_forms(t.replace(" ", ""))) + 1
@@ -107,13 +113,20 @@ def check_lookalike(parsed: ParsedEmail) -> Check:
             elif any(_typo_or_equal(keyword, words, name_words) for keyword in keywords):
                 hit = f"has a typo of '{target}' but isn't {main_domain}"
             else:
+                english = sorted({word for keyword in keywords for word in _english_typos(keyword, name_words)})
+                if english:
+                    unsure.append(f"{label} is one letter from '{target}', but '{english[0]}' is also an English word")
                 continue
             hits.append(f"{label} {hit}")
             flagged.append(display_domain)
             reported.append(target_domains)
 
+    by_hand = f"{join_first_five(unsure)}. A name that short is one letter from many words, so check it by hand."
     if hits:
-        return Check(name, Result.FLAG, strength, join_first_five(hits), domains=list(dict.fromkeys(flagged)))
+        return Check(name, Result.FLAG, strength, join_first_five(hits), [by_hand] if unsure else [],
+                     domains=list(dict.fromkeys(flagged)))
+    if unsure:
+        return Check(name, Result.INCONCLUSIVE, strength, by_hand)
     return Check(name, Result.PASS, strength, "No sender or link domain resembles a brand or your own domains")
 
 
@@ -121,25 +134,66 @@ def check_brand_joined(parsed: ParsedEmail) -> Check:
     # paypalsecure.com and mypaypal.com. Weak, not part of the lookalike check, because
     # brands own domains like this too (googleapis.com, paypalobjects.com).
     name, strength = "Brand joined to a word", Strength.WEAK
-    hits, flagged = [], []
-    targets = [(target, domains, {k for k in _name_forms(target.replace(" ", "")) if len(k) >= LONG_NAME_LENGTH})
-               for target, domains in _impersonation_targets()]
+    hits, unsure, flagged = [], [], []
+    targets = []
+    for target, domains in _impersonation_targets():
+        forms = _name_forms(target.replace(" ", ""))
+        targets.append((target, domains, {k for k in forms if len(k) >= LONG_NAME_LENGTH},
+                        {k for k in forms if MIN_NAME_LENGTH <= len(k) < LONG_NAME_LENGTH}))
     for label, display_domain, base in _unlisted_domains(parsed):
         # Split on dashes only. Joining them back would flag paypal-secure.com here as well.
         name_words = {word for form in lookalike_forms(registered_name(base)) for word in form.split("-")}
         reported = []  # one hit per organization
-        for target, target_domains, keywords in targets:
-            if target_domains in reported or not keywords:
+        for target, target_domains, long_forms, short_forms in targets:
+            if target_domains in reported:
                 continue
             # The name on its own (paypal-secure.com) is the lookalike check's job
-            if any(keyword in word for keyword in keywords for word in name_words if word not in keywords):
-                hits.append(f"{label} has '{target}' joined to another word but isn't {_main_domain(target, target_domains)}")
+            if any(keyword in word for keyword in long_forms for word in name_words if word not in long_forms):
+                result = Result.FLAG
+            else:
+                result = _short_name_joined(short_forms, name_words)
+            if result == Result.FLAG:
+                hits.append(f"{label} has '{target}' joined to another word but isn't "
+                            f"{_main_domain(target, target_domains)}")
                 flagged.append(display_domain)
                 reported.append(target_domains)
+            elif result == Result.INCONCLUSIVE:
+                unsure.append(f"{label} has '{target}' inside a word that isn't in the word list")
 
+    by_hand = f"{join_first_five(unsure)}. A name that short is often part of a real name, so check it by hand."
     if hits:
-        return Check(name, Result.FLAG, strength, join_first_five(hits), domains=list(dict.fromkeys(flagged)))
+        return Check(name, Result.FLAG, strength, join_first_five(hits), [by_hand] if unsure else [],
+                     domains=list(dict.fromkeys(flagged)))
+    if unsure:
+        return Check(name, Result.INCONCLUSIVE, strength, by_hand)
     return Check(name, Result.PASS, strength, "No sender or link domain has a brand joined to another word")
+
+
+def _short_name_joined(keywords: set[str], name_words: set[str]) -> Result | None:
+    # Only a word phishers use makes it a flag (appleid, mymeta). Any other word that isn't
+    # English could be a real name (applebees), so it's inconclusive.
+    found = None
+    for keyword in keywords:
+        for word in name_words:
+            if keyword not in word or word in keywords or _ordinary(word):
+                continue
+            start = word.find(keyword)
+            while start >= 0:
+                if all(not part or part in JOIN_WORDS for part in (word[:start], word[start + len(keyword):])):
+                    return Result.FLAG
+                found = Result.INCONCLUSIVE
+                start = word.find(keyword, start + 1)
+    return found
+
+
+def _ordinary(word: str) -> bool:
+    return word in ALLOWED_NAMES or word in _english_words()
+
+
+@functools.cache
+def _english_words() -> frozenset[str]:
+    # Read only when a short name needs it, since most emails never do
+    return frozenset(WORDS_FILE.read_text(encoding="ascii").split())
 
 
 def _impersonation_targets() -> list[tuple[str, list[str]]]:
@@ -202,9 +256,23 @@ def _has_words(text: str, name: str) -> bool:
 
 def _typo_or_equal(keyword: str, words: set[str], name_words: set[str]) -> bool:
     # Equal counts too, for a dash in the wrong place: pay-pal becomes paypal
-    checked = words if len(keyword) >= LONG_NAME_LENGTH else name_words
-    typos_checked = len(keyword) >= MIN_TYPO_LENGTH
-    return any(word == keyword or (typos_checked and _one_typo_apart(word, keyword)) for word in checked)
+    if len(keyword) >= LONG_NAME_LENGTH:
+        return any(word == keyword or _one_typo_apart(word, keyword) for word in words)
+    # An English word one letter from a short name could be a typo or just the word (appel,
+    # apply), so it doesn't count here
+    return any(word == keyword or (_short_typo(word, keyword) and not _ordinary(word)) for word in name_words)
+
+
+def _english_typos(keyword: str, name_words: set[str]) -> list[str]:
+    # English words one letter from a short name, for the analyst to judge
+    if len(keyword) >= LONG_NAME_LENGTH:
+        return []
+    return [word for word in name_words
+            if _short_typo(word, keyword) and word not in ALLOWED_NAMES and word in _english_words()]
+
+
+def _short_typo(word: str, keyword: str) -> bool:
+    return len(keyword) >= MIN_NAME_LENGTH and _one_typo_apart(word, keyword)
 
 
 def _domain_words(domain: str, max_length: int) -> list[str]:

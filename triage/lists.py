@@ -50,6 +50,20 @@ TRUSTED_AUTHSERV_IDS: set[str] = set()   # e.g. {"mx.google.com"}
 # Mail using one of these names from outside OWN_DOMAINS gets flagged.
 EXECUTIVES: set[str] = set()
 
+# Words phishers join to a short brand name (appleid.com, chaseonline.com), which get the
+# joined name flagged
+JOIN_WORDS: set[str] = {
+    "id", "login", "logon", "signin", "account", "accounts", "verify", "verification", "secure", "security",
+    "support", "help", "helpdesk", "service", "services", "update", "billing", "pay", "payment", "bank",
+    "online", "alert", "alerts", "notice", "delivery", "track", "tracking", "parcel", "shipping", "my",
+    "auth", "recovery", "unlock", "reset", "confirm", "team", "care", "customer", "portal", "access",
+}
+
+# The allowlist: words that pass when they're one letter from a short brand name or hold one
+# (mega for meta), instead of being flagged or left for the analyst. It ships with newer
+# words the English word list lacks. Add real names from your own mail, like a supplier's.
+ALLOWED_NAMES: set[str] = {"mega", "metadata"}
+
 # Hosting where every customer gets a subdomain, so paypal-login.github.io and
 # my-blog.github.io have different owners. Phishers use these since most are free and come
 # with HTTPS. Added to the Public Suffix List for the few it lacks.

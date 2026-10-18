@@ -1,10 +1,12 @@
 """Tests for triage/lists.py: entries are written the way the checks compare them, so an
 edit for your own organization doesn't quietly stop matching."""
 
+import re
+
 import pytest
 
-from triage.domains import base_domain
-from triage.lists import BRANDS, FREE_EMAIL_DOMAINS, OWN_DOMAINS, SHARED_HOSTING
+from triage.domains import base_domain, lookalike_forms
+from triage.lists import ALLOWED_NAMES, BRANDS, FREE_EMAIL_DOMAINS, JOIN_WORDS, OWN_DOMAINS, SHARED_HOSTING
 
 BRAND_DOMAINS = {d for domains in BRANDS.values() for d in domains}
 
@@ -23,6 +25,14 @@ def test_brand_name_is_lowercase_with_a_domain(name):
     assert name == name.lower()
     # The first domain is named in the evidence
     assert BRANDS[name]
+
+
+@pytest.mark.parametrize("word", sorted(JOIN_WORDS | ALLOWED_NAMES))
+def test_join_word_or_allowed_name_is_written_like_a_domain_word(word):
+    # Compared with the pieces of a domain between dots and dashes, lowercased and with
+    # lookalike digits swapped (3 to e), so Metra, metra.com or 3m would never match
+    assert re.fullmatch(r"[a-z0-9]+", word)
+    assert word in lookalike_forms(word)
 
 
 @pytest.mark.parametrize("suffix", sorted(SHARED_HOSTING))

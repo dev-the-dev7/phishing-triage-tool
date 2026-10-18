@@ -11,7 +11,9 @@ Work in progress. What works now, with `python -m triage path/to/email.eml`:
   (SHA-256, computed in memory)
 - Checks on the sender: SPF, DKIM, and DMARC results, a From that can be read more than
   one way, Reply-To, Return-Path, display name, and free webmail
-- Lookalike domains and brands joined to other words, in the sender and in links
+- Lookalike domains and brands joined to other words, in the sender and in links, with
+  short brand names like Apple and Meta checked against an English word list, so ordinary
+  words aren't flagged
 - Link text that shows one domain but goes to another, and links that run a script or
   open a file share or another program
 - Links rewritten by Microsoft's Safe Links, Proofpoint, or Google's redirect, read as where
@@ -244,6 +246,21 @@ includes the company's root certificate.
   brand's real domain put in front of someone else's
   (`login.microsoftonline.com.evil.net`) is flagged too, which also covers real domains
   that don't contain the brand name.
+
+- **Short brand names are told apart from ordinary words with a word list.** A name under
+  six letters is one letter from ordinary words (apple: apply) and sits inside others
+  (pineapple), so spelling alone can't tell a lookalike from a word. The tool asks ENABLE,
+  an English word list its authors released into the public domain, which ships with the
+  tool (`triage/english_words.txt`, `enable1.txt` from github.com/dolph/dictionary) so it
+  works offline. A typo that isn't a word (`appie.com`, `metq.com`) is flagged. One that
+  is a word is inconclusive, since it can be harmless (`apply.com`) or a typosquat
+  (`appel.com`). A short name joined to a word phishers use (`appleid.com`, `mymeta.com`,
+  from `JOIN_WORDS` in `lists.py`) is flagged, inside an English word (`pineapple.com`) it
+  passes, and inside anything else (`applebyfarms.com`) it's inconclusive. `ALLOWED_NAMES`
+  passes the rest: it ships with newer words the list lacks (`mega`, `metadata`), and real
+  names that come up in your own mail, like a supplier's, can be added there. So in the
+  registered domain, nothing one letter from a short name or holding it passes, except a
+  longer English word holding it or a name you've listed.
 
 - **Links are read the way a browser reads them.** Python's URL parser disagrees with
   browsers in ways phishers use. A browser treats `\` as `/`, so
@@ -545,18 +562,24 @@ includes the company's root certificate.
   (`wells.farqo-alerts.com`).
 
 - **A brand joined to another word (`paypalsecure.com`) is only a weak flag**, because
-  brands own domains like that too (`googleapis.com`). Short brand names aren't checked
-  this way, since they sit inside ordinary words (pineapple, purchase).
+  brands own domains like that too (`googleapis.com`). A short brand name joined to a word
+  that isn't in `JOIN_WORDS` or the word list is inconclusive, which includes real company
+  names (`applebyfarms.com`) until they're added to `ALLOWED_NAMES`.
 
-- **Short brand names like Apple and Chase are one letter from common words** (apply,
-  phase), so typos of them are only checked in the registered domain name, not in
-  subdomains. `appel.com` and `chose.com` are flagged, `appel.example.com` isn't. A
-  registered name that's a real word next to a brand still gets flagged, like
-  `apply-now.com` or `chaser-games.com`.
+- **Typos of short brand names are only checked in the registered domain name**, not in
+  subdomains, so `appel.example.com` isn't flagged. A phisher can write the real name in a
+  subdomain for free, and hostnames are full of short labels like `mta` or `cdn` that
+  aren't words. A typo that's an English word, like `apply-now.com` or `beta.com`, comes
+  out inconclusive, so the analyst sees it even though most are harmless.
 
-- **Names under five letters, like Meta, aren't checked for typos at all**, since nearly
-  every word that short is one letter from another (beta, mega, metal). `meta-support.com`
-  and `m3ta.com` are still flagged, `metta.com` isn't.
+- **The word list is English and from around 2000**, so newer and foreign words read as
+  not words: a typo that's one is flagged, and a short name inside one is inconclusive,
+  until it's added to `ALLOWED_NAMES`. Real names that aren't words are treated the same:
+  `metra.com`, Chicago's commuter rail, is flagged as a typo of meta.
+
+- **Names under four letters aren't typo-checked or looked for inside words**, since
+  nearly every short label is one letter from them. They're still caught spelled right
+  (`ibm-login.com`) or with lookalike characters.
 
 - **Lookalike characters cover the common cases, not all of Unicode:** digit swaps (`0`
   for `o`), the Cyrillic and Greek letters Unicode lists as looking like a Latin one (`а`,

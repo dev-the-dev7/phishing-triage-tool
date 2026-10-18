@@ -3,8 +3,8 @@
 import pytest
 
 from triage import impersonation
-from triage.impersonation import (MIN_TYPO_LENGTH, _one_typo_apart, check_brand_joined,
-                                  check_display_name, check_lookalike)
+from triage.impersonation import (LONG_NAME_LENGTH, MIN_NAME_LENGTH, _english_words, _one_typo_apart,
+                                  check_brand_joined, check_display_name, check_lookalike)
 from triage.lists import BRANDS
 from triage.models import Address, Link, ParsedEmail, Result
 
@@ -79,15 +79,18 @@ LOOKALIKE_DOMAINS = [
     ("whatsap.com", "whatsapp.com"),
     ("linkedln.com", "linkedin.com"),
     ("0ffice365.com", "office365.com"),
-    # Names under five letters aren't typo-checked, but still match spelled right or with digits
+    # A short name matches spelled right, with digits, or with a typo that isn't a word
     ("meta-business-support.com", "meta.com"),
     ("m3ta.com", "meta.com"),
+    ("metta.com", "meta.com"),
+    ("metq.com", "meta.com"),
     # Names of six letters or more are typo-checked in subdomains too
     ("login.amazom.evil.net", "amazon.com"),
     # Short names are typo-checked in the registered name
-    ("appel.com", "apple.com"),
-    ("chose.com", "chase.com"),
+    ("appie.com", "apple.com"),
     ("clase.com", "chase.com"),
+    # A long name's typo counts even when it's a word
+    ("goggle.com", "google.com"),
     known_limitation("g\N{ARMENIAN SMALL LETTER OH}\N{ARMENIAN SMALL LETTER OH}gle.com", "google.com",
                      reason="Armenian letters aren't swapped"),
     # Two of each, since a single one is already caught as a typo
@@ -95,7 +98,6 @@ LOOKALIKE_DOMAINS = [
                      "google.com", reason="Latin variants aren't swapped"),
     known_limitation("l\N{LATIN SMALL LETTER DOTLESS I}nked\N{LATIN SMALL LETTER DOTLESS I}n.com",
                      "linkedin.com", reason="Latin variants aren't swapped"),
-    known_limitation("metta.com", "meta.com", reason="names under five letters aren't typo-checked"),
     known_limitation("wells.farqo-alerts.com", "wellsfargo.com",
                      reason="a multi-word name split by a dot isn't typo-checked"),
 ]
@@ -118,11 +120,13 @@ def _one_letter_typos(name: str) -> set[str]:
     return typos
 
 
-# A set, since two brands could share a typo and pytest refuses a repeated test case
+# A set, since two brands could share a typo and pytest refuses a repeated test case. An English
+# word near a short name is left to the analyst instead.
 @pytest.mark.parametrize("domain", sorted({
     f"{typo}.com"
-    for brand in BRANDS if len(brand.replace(" ", "")) >= MIN_TYPO_LENGTH
+    for brand in BRANDS if len(brand.replace(" ", "")) >= MIN_NAME_LENGTH
     for typo in _one_letter_typos(brand.replace(" ", ""))
+    if len(brand.replace(" ", "")) >= LONG_NAME_LENGTH or typo not in _english_words()
 }))
 def test_every_dropped_doubled_or_swapped_letter_flags(domain):
     assert check_lookalike(link_to(domain)).result == Result.FLAG
@@ -172,17 +176,50 @@ def test_real_domain_in_front_flags(domain, real_domain):
     "cloudflare.com", "connect.example.com", "clinic-news.com", "cleveland.com", "classroom.org",
     "channel4.com", "cornell.edu", "learnmore.io", "annual-report.com", "tennis.org", "inn.com",
     "cnn.com", "pinnacle.com", "cinnamon.com", "hannah-design.com",
-    # One letter from a name under five letters
-    "beta.com", "mega.nz", "metal.com", "metra.com", "mesa.com", "zeta.com", "linked.com",
+    # An allowed name one letter from a short name, and a word two letters from a long one
+    "mega.nz", "linked.com",
     # Short names aren't typo-checked in subdomains, where a phisher would write the real name
     "appel.example.com", "chose.example.com",
     # A real domain inside a longer word, like a CDN host for purchase.com
     "www.purchase.com.edgekey.net",
-    known_limitation("apply-now.com", reason="a real word one letter from a short name, in the registered name"),
-    known_limitation("chaser-games.com", reason="a real word one letter from a short name, in the registered name"),
 ])
 def test_ordinary_domain_passes(domain):
     assert check_lookalike(link_to(domain)).result == Result.PASS
+
+
+@pytest.mark.parametrize("domain, word", [
+    ("appel.com", "appel"), ("apply-now.com", "apply"), ("chaser-games.com", "chaser"), ("beta.com", "beta"),
+])
+def test_an_english_word_one_letter_from_a_short_name_is_inconclusive(domain, word):
+    # It can be a typosquat (appel.com) or just the word (apply.com), and the spelling can't tell
+    check = check_lookalike(link_to(domain))
+    assert check.result == Result.INCONCLUSIVE
+    assert check.evidence.startswith(f"{domain} [link] is one letter from ")
+    assert f", but '{word}' is also an English word. " in check.evidence
+
+
+def test_next_to_a_flag_an_english_word_is_a_caveat():
+    check = check_lookalike(ParsedEmail(links=[Link("https://paypa1.com/", ""), Link("https://appel.com/", "")]))
+    assert check.result == Result.FLAG
+    assert check.caveats == ["appel.com [link] is one letter from 'apple', but 'appel' is also an English word. A "
+                             "name that short is one letter from many words, so check it by hand."]
+
+
+def test_allowed_names_pass(monkeypatch):
+    # Real names that aren't English words, like Chicago's Metra
+    assert check_lookalike(link_to("metra.com")).result == Result.FLAG
+    monkeypatch.setattr(impersonation, "ALLOWED_NAMES", {"metra"})
+    assert check_lookalike(link_to("metra.com")).result == Result.PASS
+    assert check_brand_joined(link_to("applebees.com")).result == Result.INCONCLUSIVE
+
+
+def test_names_under_four_letters_arent_typo_checked(monkeypatch):
+    # Nearly every short label is one letter from them
+    monkeypatch.setattr(impersonation, "OWN_NAMES", {"ibm"})
+    monkeypatch.setattr(impersonation, "OWN_DOMAINS", ["ibm.com"])
+    assert check_lookalike(link_to("ibn.com")).result == Result.PASS
+    assert check_lookalike(link_to("ibm-login.com")).result == Result.FLAG
+    assert check_brand_joined(link_to("ibmlogin.com")).result == Result.PASS
 
 
 @pytest.mark.parametrize("domain", [
@@ -192,6 +229,8 @@ def test_ordinary_domain_passes(domain):
     "docusignnow.com",
     # A name of several words is joined without its spaces
     "mywellsfargo.com",
+    # Short names joined to a word phishers use
+    "appleid.com", "applesupport.com", "mymeta.com", "metaverify.com", "fedexdelivery.com", "chaseonline.com",
 ])
 def test_brand_joined_to_a_word_flags(domain):
     check = check_brand_joined(link_to(domain))
@@ -201,12 +240,24 @@ def test_brand_joined_to_a_word_flags(domain):
 @pytest.mark.parametrize("domain", [
     # The name on its own is the lookalike check's job
     "paypal-secure.com",
-    # Short names sit inside ordinary words, so they aren't checked
-    "pineapple.com", "purchase.com",
+    # A short name inside an English word or an allowed name
+    "pineapple.com", "purchase.com", "metal.com", "metadata.com",
     "paypal.com",
 ])
 def test_brand_joined_passes(domain):
     assert check_brand_joined(link_to(domain)).result == Result.PASS
+
+
+def test_a_short_name_joined_to_another_word_is_inconclusive():
+    # Like Appleby Farms, a real name holding a short brand name
+    check = check_brand_joined(link_to("applebyfarms.com"))
+    assert (check.result, check.evidence) == (
+        Result.INCONCLUSIVE, "applebyfarms.com [link] has 'apple' inside a word that isn't in the word list. A name "
+        "that short is often part of a real name, so check it by hand.")
+    links = [Link("https://appleid.com/", ""), Link("https://applebyfarms.com/", "")]
+    check = check_brand_joined(ParsedEmail(links=links))
+    assert check.result == Result.FLAG
+    assert check.caveats[0].startswith("applebyfarms.com [link] has 'apple' inside a word")
 
 
 @pytest.mark.parametrize("display_name", [
