@@ -34,9 +34,9 @@ def run(capsys, *args) -> tuple[int, str, str]:
 
 
 def results(out: str) -> dict[str, str]:
-    # "  FLAG         strong  DMARC: ..." gives {"DMARC": "FLAG"}
+    # "  FLAG         very strong Ambiguous From: ..." gives {"Ambiguous From": "FLAG"}
     return dict((name, result) for result, name in
-                re.findall(r"^  (FLAG|PASS|INCONCLUSIVE) +\w+ +([^:]+):", out, re.M))
+                re.findall(r"^  (FLAG|PASS|INCONCLUSIVE) +(?:very )?\w+ +([^:]+):", out, re.M))
 
 
 def section(out: str, heading: str) -> list[str]:
@@ -134,8 +134,9 @@ def test_caveats_are_printed_under_their_check(capsys, tmp_path):
     ))
     _, out, _ = run(capsys, path)
     lines = out.splitlines()
-    flag = lines.index("  FLAG         strong  Link text vs destination: text shows paypal.com but goes to evil.net")
-    assert lines[flag + 1] == (" " * 23 + "Caveat: A tag sits in the middle of paypal.com in a link to evil.com, "
+    flag = lines.index("  FLAG         strong      Link text vs destination: text shows paypal.com but goes to "
+                       "evil.net")
+    assert lines[flag + 1] == (" " * 27 + "Caveat: A tag sits in the middle of paypal.com in a link to evil.com, "
                                "where CSS could change what the reader sees. Check what the link looks like in a "
                                "mail client, without clicking it.")
     # The line after is the next check
@@ -436,7 +437,7 @@ def test_enrich_checks_how_new_the_domains_are(capsys, monkeypatch):
                         given.append(flagged) or {})
     _, out, _ = run(capsys, FIXTURES / "suspicious.eml", "--enrich")
     assert given == [["paypa1.com"]]
-    assert ("  INCONCLUSIVE medium  Newly registered domain: No registration date for paypa1.com; "
+    assert ("  INCONCLUSIVE medium      Newly registered domain: No registration date for paypa1.com; "
             "bit.ly") in section(out, "Findings")
     assert "Newly registered domain" not in run(capsys, FIXTURES / "suspicious.eml")[1]
 
@@ -451,9 +452,9 @@ def test_enrich_checks_who_owns_hops_named_as_microsofts(capsys, tmp_path, monke
         " Tue, 6 Oct 2026 10:00:00 +0000\r\nFrom: a@example.org\r\nSubject: s\r\n\r\nHello"))
     _, out, _ = run(capsys, path, "--enrich")
     assert section(out, "Findings")[0] == (
-        "  FLAG         strong  Faked Microsoft hop: Received header 1 calls itself x.prod.outlook.com, but AbuseIPDB "
-        "lists 203.0.113.9 under digitalocean.com: no reports in the last 90 days, DigitalOcean, LLC in US. The first "
-        "is the server Microsoft really got the email from, so the Origin line may be wrong")
+        "  FLAG         very strong Faked Microsoft hop: Received header 1 calls itself x.prod.outlook.com, but "
+        "AbuseIPDB lists 203.0.113.9 under digitalocean.com: no reports in the last 90 days, DigitalOcean, LLC in US. "
+        "The first is the server Microsoft really got the email from, so the Origin line may be wrong")
     # The email didn't list the hop's IP, but it's likely the sender's server, so it's an indicator
     indicators = section(out, "Indicators, defanged")
     row = indicators.index("  IP       203[.]0[.]113[.]9 (from the Faked Microsoft hop check)")

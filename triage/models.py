@@ -44,6 +44,7 @@ class Result(StrEnum):
 
 
 class Strength(StrEnum):
+    VERY_STRONG = "very strong"  # no known legitimate sender does it
     STRONG = "strong"
     MEDIUM = "medium"
     WEAK = "weak"

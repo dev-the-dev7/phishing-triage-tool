@@ -46,6 +46,7 @@
   "summary": {
     "strongest_flag": "strong",
     "flagged": {
+      "very strong": 0,
       "strong": 4,
       "medium": 1,
       "weak": 0

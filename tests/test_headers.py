@@ -321,7 +321,7 @@ def test_encoded_reply_to_is_a_caveat_when_it_already_has_a_result(from_addr, re
 ])
 def test_ambiguous_from(from_lines, evidence):
     assert check_ambiguous_from(parse(*from_lines)) == [
-        Check("Ambiguous From", FLAG, "strong", evidence)]
+        Check("Ambiguous From", FLAG, "very strong", evidence)]
 
 
 def test_one_plain_from_isnt_listed():

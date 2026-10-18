@@ -20,13 +20,13 @@ def section(text: str, heading: str) -> list[str]:
 def test_flags_go_first_strongest_first_then_inconclusive_then_passes():
     checks = [Check("A", "pass", "strong", ""), Check("B", "flag", "weak", ""),
               Check("C", "inconclusive", "strong", ""), Check("D", "flag", "strong", ""),
-              Check("E", "flag", "weak", ""), Check("F", "flag", "medium", "")]
+              Check("E", "flag", "weak", ""), Check("F", "flag", "medium", ""), Check("G", "flag", "very strong", "")]
     report = report_of(checks)
     # Checks with the same result and strength keep the order they ran in
-    assert [check.name for check in report.findings] == ["D", "F", "B", "E", "C", "A"]
+    assert [check.name for check in report.findings] == ["G", "D", "F", "B", "E", "C", "A"]
     assert section(render_text(report), "Summary") == [
-        "  Strongest flag: strong",
-        "  Flagged: 1 strong, 1 medium, 2 weak   Inconclusive: 1   Passed: 1   Indicators: 0",
+        "  Strongest flag: very strong",
+        "  Flagged: 1 very strong, 1 strong, 1 medium, 2 weak   Inconclusive: 1   Passed: 1   Indicators: 0",
     ]
 
 
@@ -235,7 +235,8 @@ def test_the_json_holds_the_same_report():
     assert data["email"]["subject"] == "Hi\x1b\N{RIGHT-TO-LEFT OVERRIDE}"
     assert data["origin"] == {"ip": "8.8.8.8", "name": "x", "received_by": "mx.example.net", "earliest_claim": None,
                               "network": None}
-    assert data["summary"] == {"strongest_flag": "strong", "flagged": {"strong": 1, "medium": 0, "weak": 0},
+    assert data["summary"] == {"strongest_flag": "strong",
+                               "flagged": {"very strong": 0, "strong": 1, "medium": 0, "weak": 0},
                                "inconclusive": 1, "passed": 2, "indicators": 1, "warnings": 0}
     assert data["checks"][0] == {"name": "DMARC", "result": "flag", "strength": "strong",
                                  "evidence": "dmarc=fail for paypa1.com", "caveats": ["c"]}

@@ -89,8 +89,10 @@ includes the company's root certificate.
 
 - **Every check ends as flag, pass, or inconclusive.** Inconclusive means the check
   couldn't tell either way, like DKIM on a message with no signature, or a link whose text
-  CSS could change. Each check has a fixed strength (strong, medium, weak) that says how
-  much it matters when it flags.
+  CSS could change. Each check has a fixed strength (very strong, strong, medium, weak)
+  that says how much it matters when it flags. Very strong is for what no known legitimate
+  sender does, like two From headers, and strong for what real mail does now and then, like
+  a mailing list breaking DMARC.
 
 - **A check can carry caveats:** something close to it that it couldn't check, or a
   pointer to a related check. The analyst should look at them whatever the result is. A
@@ -166,12 +168,12 @@ includes the company's root certificate.
   can check one while the mail client shows the other, so a pass for a different domain
   isn't counted.
 
-- **A From that can be read more than one way is a strong flag.** Two From headers, two
-  addresses in one, or encoded text in the address let a mail client show a different
+- **A From that can be read more than one way is a very strong flag.** Two From headers,
+  two addresses in one, or encoded text in the address let a mail client show a different
   From than the one DMARC checked, which researchers used to get past DMARC at large
-  providers ("Composition Kills", 2020). Real mail almost never does this (several authors
-  in one From is allowed, but rare), so the Ambiguous From check is only listed when it
-  finds something.
+  providers ("Composition Kills", 2020). Several authors in one From is allowed, but common
+  mail programs only send from one address, so the Ambiguous From check is only listed
+  when it finds something.
 
 - **Every From address is checked.** Mail clients don't agree on which one they show, so
   each check that compares the From runs on every one: a flag on any of them counts, and a
@@ -383,11 +385,11 @@ includes the company's root certificate.
   hop was written down by Microsoft's server, so it can't be faked. With `--enrich`, each
   hop taken as Microsoft's on its name is looked up in AbuseIPDB, whose answer names the
   IP's owner, and one that isn't Microsoft's (`microsoft.com`, or one of its mail domains
-  like `outlook.com`) is flagged. It's strong, and its reports are in the evidence. When
-  every hop above it is Microsoft's, the first such hop is the server Microsoft really got
-  the email from. When one above it couldn't be checked, that one could be, so it's named
-  in a caveat. These IPs are only sent to AbuseIPDB and aren't listed as indicators, since
-  they're meant to be Microsoft's.
+  like `outlook.com`) is flagged. It's very strong, and its reports are in the evidence.
+  When every hop above it is Microsoft's, the first such hop is the server Microsoft
+  really got the email from. When one above it couldn't be checked, that one could be, so
+  it's named in a caveat. These IPs are only sent to AbuseIPDB, and only a faked one is
+  listed as an indicator, since the rest are meant to be Microsoft's.
 
 - **What would tell the service about your network or your people isn't sent.** Private
   and reserved IPs and internal names (`srv01.corp.local`) mean nothing outside your

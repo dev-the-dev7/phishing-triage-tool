@@ -20,7 +20,7 @@ MAX_LONG_CHARS = 1_000
 
 HASH_NAMES = {32: "MD5", 40: "SHA-1", 64: "SHA-256"}
 RESULT_ORDER = [Result.FLAG, Result.INCONCLUSIVE, Result.PASS]
-STRENGTH_ORDER = [Strength.STRONG, Strength.MEDIUM, Strength.WEAK]
+STRENGTH_ORDER = [Strength.VERY_STRONG, Strength.STRONG, Strength.MEDIUM, Strength.WEAK]
 
 # Suggestions for the analyst, never steps the tool took
 FOLLOW_UPS = [
@@ -217,8 +217,9 @@ def _origin_parts(report: Report, shown) -> list[str]:
 
 
 def _check_lines(check: Check) -> list[str]:
-    return ([f"  {check.result.upper():<12} {check.strength:<7} {check.name}: {_shown(check.evidence, MAX_LONG_CHARS)}"]
-            + [f"{'':23}Caveat: {_shown(caveat, MAX_LONG_CHARS)}" for caveat in check.caveats])
+    return ([f"  {check.result.upper():<12} {check.strength:<11} {check.name}: "
+             f"{_shown(check.evidence, MAX_LONG_CHARS)}"]
+            + [f"{'':27}Caveat: {_shown(caveat, MAX_LONG_CHARS)}" for caveat in check.caveats])
 
 
 def _indicator_lines(report: Report) -> list[str]:

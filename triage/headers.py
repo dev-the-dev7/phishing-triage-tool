@@ -184,7 +184,7 @@ def check_ambiguous_from(parsed: ParsedEmail) -> list[Check]:
     found += [_encoded(a) for a in parsed.from_addrs if a.decoded]
     if not found:
         return []
-    return [Check("Ambiguous From", Result.FLAG, Strength.STRONG, ". ".join(found))]
+    return [Check("Ambiguous From", Result.FLAG, Strength.VERY_STRONG, ". ".join(found))]
 
 
 def _encoded(address: Address) -> str:

@@ -176,7 +176,7 @@ def check_domain_age(found: Indicators, results: dict[str, list[Reputation]]) ->
 def check_microsoft_hops(origin: Origin | None, results: dict[str, list[Reputation]]) -> Check:
     # A sender can name itself as a Microsoft server and be skipped as one, but Microsoft's
     # server wrote down its IP, and the IP's owner can't be faked
-    name, strength = "Faked Microsoft hop", Strength.STRONG
+    name, strength = "Faked Microsoft hop", Strength.VERY_STRONG
     hops = origin.microsoft_hops if origin else []
     faked, faked_ips, unknown, unknown_above = [], [], [], []
     for position, server, ip in hops:
