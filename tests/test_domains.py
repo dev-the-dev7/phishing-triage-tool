@@ -87,6 +87,7 @@ BROWSER_HOSTS = [
     ("http://0x/", "0.0.0.0"),
     ("http://1.2.3.0x/", "1.2.3.0"),
     ("http://4294967295/", "255.255.255.255"),
+    ("http://0xff.0xff.0xff.0xff/", "255.255.255.255"),
     ("http://%31%32%37.1/", "127.0.0.1"),
     (f"http://{fullwidth('0x7f')}.{fullwidth('1')}/", "127.0.0.1"),
     # Not numbers, so a domain
@@ -106,7 +107,7 @@ def test_url_host_drops_a_trailing_dot():
     assert url_host("http://1.2.3.4./") == "1.2.3.4"
 
 
-@pytest.mark.parametrize("host", ["08.1.1.1", "09", "1.2.3.4.5", "256.1.1.1", "1.2.3.256", "4294967296",
+@pytest.mark.parametrize("host", ["08.1.1.1", "09", "1.2.3.4.0", "256.1.1.1", "1.2.3.256", "4294967296",
                                   "1.16777216", "1.2.65536", "1..2", "example.123", "99999999999"])
 def test_numeric_host_a_browser_refuses_is_kept(host):
     # The browser won't open these. The host is kept as written, so the link is still checked.

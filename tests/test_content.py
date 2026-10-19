@@ -37,6 +37,7 @@ def test_shown_text():
     ('.x::before{CONTENT: "@"}', '"@"'),
     # Text from an attribute
     (".x::after{content: attr(title)}", '"attr(title)"'),
+    (".x::after{content: ATTR(title)}", '"ATTR(title)"'),
     # Text after an image still counts
     ('.x::after{content: url("dot.png") "paypal.com"}', '"paypal.com"'),
     # Long text is cut short, and each text is listed once
@@ -91,6 +92,14 @@ def test_shown_text_of_every_html_part():
     # Several hidden pieces in a row are one
     ('Your Mic<i hidden>a</i><i hidden> b</i>rosoft account', "Mic[a b]rosoft shows as Microsoft"),
     ("1<template>0</template>00", "1[0]00 shows as 100"),
+    # One letter on either side is enough
+    ('Your M<span style="font-size:0">x</span>icrosoft account', "M[x]icrosoft shows as Microsoft"),
+    ('Your Microsof<span style="font-size:0">x</span>t account', "Microsof[x]t shows as Microsoft"),
+    # Other ways to hide it
+    ('Pay<span style="visibility:collapse">x</span>Pal account', "Pay[x]Pal shows as PayPal"),
+    ('Pay<span style="display:/**/none">x</span>Pal account', "Pay[x]Pal shows as PayPal"),
+    # The hidden span still holds the text after the span inside it
+    ('Pay<span hidden>x<span>y</span>z</span>Pal account', "Pay[xyz]Pal shows as PayPal"),
 ])
 def test_text_hidden_inside_a_word(html, found):
     parsed = html_email(html)
@@ -108,6 +117,8 @@ def test_text_hidden_inside_a_word(html, found):
     'Hello <span hidden>x</span>world',
     '<p>Hello</p><p hidden>x</p><p>world</p>',
     "Hello<br><span hidden>x</span>world",
+    # A hidden element left open ends with the block it's in, which still takes up its line
+    "<div>Hello<span hidden>x</div>world",
     # Only spaces or invisible characters hidden, the way templates close the gaps between images
     '<div style="font-size:0"><span style="font-size:14px">A</span> <span style="font-size:14px">B</span></div>',
     'Pay<span style="display:none">&zwnj;&#8203;</span>ment',

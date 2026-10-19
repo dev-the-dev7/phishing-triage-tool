@@ -26,6 +26,8 @@ SAFE_LINK = ("https://nam02.safelinks.protection.outlook.com/?url=https%3A%2F%2F
     ("https://urldefense.com/v3/__https://evil.com/a*b**Ac__;KyUl!!x!y$", "https://evil.com/a+b%%c"),
     ("https://urldefense.com/v3/__https://evil.com/__;!!x!y$", "https://evil.com/"),
     ("https://urldefense.com/v2/url?u=https-3A__evil.com_&d=x", "https://evil.com/"),
+    # Backslashes, which a browser reads as slashes
+    (r"https:\\urldefense.proofpoint.com\v2\url?u=https-3A__evil.com_&d=x", "https://evil.com/"),
     ("https://urldefense.proofpoint.com/v3/__https://evil.com/__;!!x!y$", "https://evil.com/"),
     ("https://www.google.com/url?q=https://evil.com/&sa=D&source=editors&usg=AOv", "https://evil.com/"),
     # A search result, where q= is the search
@@ -39,8 +41,8 @@ SAFE_LINK = ("https://nam02.safelinks.protection.outlook.com/?url=https%3A%2F%2F
      "%3Fu%3Dhttps-3A__evil.com_%26d%3Dx&data=x", "https://evil.com/"),
 ], ids=["Safe Links", "Safe Links, US government", "Proofpoint v1", "Proofpoint v2", "Proofpoint v3",
         "Proofpoint v3 run", "Proofpoint v3, nothing swapped", "Proofpoint v2, other host",
-        "Proofpoint v3, other host", "Google", "Google search result", "space in front", "tab inside",
-        "no scheme", "wrapped twice"])
+        "Proofpoint v2, backslashes", "Proofpoint v3, other host", "Google", "Google search result",
+        "space in front", "tab inside", "no scheme", "wrapped twice"])
 def test_the_real_link_is_read_out(wrapped, real):
     assert unwrap(wrapped) == real
 

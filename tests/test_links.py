@@ -84,6 +84,12 @@ def test_matching_or_missing_domain_passes(href, text):
     assert mismatch(href, text).result == Result.PASS
 
 
+def test_a_link_with_no_host_doesnt_end_the_check():
+    # Or a mailto: link first would hide every link after it
+    links = [Link("mailto:help@paypal.com", "help@paypal.com"), Link("https://evil.com/", "paypal.com")]
+    assert check_link_mismatch(ParsedEmail(links=links)).evidence == "text shows paypal.com but goes to evil.com"
+
+
 def test_evidence_lists_five_links():
     links = [Link(f"https://evil{i}.com/", "paypal.com") for i in range(7)]
     evidence = check_link_mismatch(ParsedEmail(links=links)).evidence
@@ -202,6 +208,12 @@ def test_link_split_across_outlook_parts():
                         "<!--[IF MSO]></a><![endif]-->")
     assert links_in(parsed) == [("https://evil.com/", "paypal.com")]
     assert check_link_mismatch(parsed).evidence == "text shows paypal.com but goes to evil.com"
+
+
+def test_outlook_markers_in_capitals():
+    # Read in capitals too, so a link Outlook might show isn't missed
+    parsed = html_email('<!--[IF MSO]><a href="https://evil.com/">paypal.com</a><![ENDIF]-->')
+    assert links_in(parsed) == [("https://evil.com/", "paypal.com")]
 
 
 def test_image_map_area_is_a_link():
@@ -630,8 +642,8 @@ def test_elements_a_browser_ends_without_an_end_tag(html, text):
 def test_base_href(html, href):
     parsed = html_email(html)
     assert links_in(parsed) == [(href, "Sign in")]
-    # One base gives no warning
-    assert parsed.parse_warnings == []
+    # One base gives no warning or caveat
+    assert (parsed.parse_warnings, check_link_mismatch(parsed).caveats) == ([], [])
 
 
 @pytest.mark.parametrize("decoy", [
@@ -677,6 +689,14 @@ def test_bases_no_link_uses_dont_count(monkeypatch):
     bases = '<base href="https://one.com/"><base href="https://two.com/"><base href="https://evil.com/">'
     check = check_link_mismatch(html_email(bases + '<a href="https://example.org/">example.org</a>'))
     assert (check.result, check.caveats) == (Result.PASS, [])
+
+
+def test_bases_are_counted_in_each_html_part():
+    # A part with no base can't hide the bases in another
+    parsed = multipart_email("mixed", "Content-Type: text/html\r\n\r\n<p>Hi</p>",
+                             'Content-Type: text/html\r\n\r\n<base href="https://paypal.com/">'
+                             '<base href="https://evil.com/"><a href="/login">Sign in</a>')
+    assert parsed.base_tags == 2
 
 
 def test_a_base_only_outlook_reads_is_counted():
