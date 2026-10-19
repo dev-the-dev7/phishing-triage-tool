@@ -296,7 +296,7 @@ def read_html(html: str, warnings) -> ParsedHTML:
         outlook_html = OUTLOOK_MARKERS.sub("", html)
         outlook_warnings = []
         outlook = _collect(outlook_html, outlook_warnings)
-        warnings += [warning for warning in outlook_warnings if warning not in warnings]
+        warnings += outlook_warnings
         seen = {(link.href, link.text, link.full_text) for link in parsed.links}
         parsed.links += [link for link in outlook.links if (link.href, link.text, link.full_text) not in seen]
         known = set(parsed.other_urls)

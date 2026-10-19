@@ -198,6 +198,13 @@ def test_encoded_text_where_no_check_reads_it_warns(header):
         "allowed in an address. Some mail clients decode it and show service@paypal.com@evil.com"]
 
 
+def test_several_encoded_addresses_in_a_header_are_one_warning():
+    parsed = parse("From: a@example.org", "Sender: =?utf-8?q?a?=@evil.com", "Sender: =?utf-8?q?b?=@evil.com")
+    assert parsed.parse_warnings == [
+        "2 Sender addresses have encoded text in them, which isn't allowed in an address. Some mail clients decode "
+        "them and show a@evil.com for =?utf-8?q?a?=@evil.com; b@evil.com for =?utf-8?q?b?=@evil.com"]
+
+
 @pytest.mark.parametrize("from_value, display_name", [
     ("=?utf-8?b?UGF5UGFs?= <service@evil.com>", "PayPal"),
     ("=?x-unknown?q?PayPal?= <service@evil.com>", "PayPal"),
@@ -342,6 +349,15 @@ def test_email_inside_an_attached_email_doesnt_warn():
     assert attached[0].startswith("An unnamed part")
 
 
+def test_several_attached_emails_are_one_warning():
+    parts = [f'Content-Type: message/rfc822\r\nContent-Disposition: attachment; filename="{n}.eml"\r\n\r\n{INNER_EMAIL}'
+             for n in range(6)]
+    content_type, body = multipart(TEXT_PART, *parts)
+    assert parse("From: employee@example.org", content_type, body=body).parse_warnings == [
+        '6 emails are attached to this one: "0.eml", "1.eml", "2.eml", "3.eml", "4.eml" (and 1 more). If this is a '
+        "forwarded report, the checks ran on the wrapper. Save them and run the tool on each."]
+
+
 def test_nested_attached_emails_warn_once():
     raw = "To: someone@example.net\r\nSubject: s\r\n" + nested(100, "message/rfc822")
     warnings = parse_bytes(raw.encode()).parse_warnings
@@ -394,3 +410,10 @@ def test_unknown_body_charset_is_decoded_as_utf8():
     parsed = parse("From: a@example.org", "Content-Type: text/plain; charset=x-unknown", body="Hello")
     assert parsed.text_body == "Hello"
     assert "plain body has an unknown charset, decoded as UTF-8" in parsed.parse_warnings
+
+
+def test_a_warning_repeated_word_for_word_is_given_once():
+    unknown = "Content-Type: text/plain; charset=x-unknown\r\n\r\nHello"
+    content_type, body = multipart(unknown, unknown, unknown)
+    assert parse("From: a@example.org", content_type, body=body).parse_warnings == [
+        "plain body has an unknown charset, decoded as UTF-8"]

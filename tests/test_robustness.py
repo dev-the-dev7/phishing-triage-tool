@@ -9,6 +9,7 @@ import pytest
 
 from triage.checks import run_checks
 from triage.iocs import from_email
+from triage.models import MAX_FROMS
 from triage.parser import parse_bytes
 from triage.received import find_origin, received_warnings
 
@@ -88,6 +89,49 @@ def run_damaged(count: int, seed: int) -> None:
             triage(raw)
         except Exception as e:
             raise AssertionError(f"{type(e).__name__} on this email: {raw!r}") from e
+
+
+def repeated(n: int) -> bytes:
+    # Every item a sender can repeat, n times over, numbered to the same width so the first five
+    # are as long at any size. Authentication-Results is left out, since your provider writes it.
+    date = "Tue, 06 Oct 2026 10:00:00 +0000"
+    headers = [f"{name}: =?utf-8?q?x{i:03}?=@{domain}{i:03}.com" for i in range(n)
+               for name, domain in (("From", "paypa"), ("Sender", "evil"), ("Reply-To", "reply"))]
+    headers += [f"Return-Path: <=?utf-8?q?b{i:03}?=@bounce{i:03}.com>" for i in range(n)]
+    headers += ["To: " + ", ".join(f"=?utf-8?q?t{i:03}?=@example.net" for i in range(n))]
+    headers += [f"Received: from 203.0.113.{i} by mta.example.org with HTTP; {date}" for i in range(n)]
+    html = "\n".join(
+        f'<a href="https://evil{i:03}.com/">paypal.com</a> <a href="javascript:x{i:03}()">Open</a> '
+        f'<a href="https://www.google.com/url?q=https://g{i:03}.com/">Go</a> <a href="https://nam12.safelinks.'
+        f'protection.outlook.com/?url=https://a{i:03}.com/&amp;url=https://b{i:03}.com/">Click</a> '
+        f'<a href="https://x{i:03}.com/">pay<b>pal{i:03}</b>.com</a> Mic<span style="font-size:0">x{i:03}</span>rosoft '
+        f'<base href="https://base{i:03}.com/"><style>.c{i:03}::after {{content: "pay{i:03}pal.com"}}</style>'
+        for i in range(n))
+    parts = [f"Content-Type: text/html\r\n\r\n{html}"] + ["Content-Type: text/plain; charset=x-unknown\r\n\r\nhi"] * n
+    parts += [f'Content-Type: message/rfc822\r\nContent-Disposition: attachment; filename="{i:03}.eml"\r\n\r\nhi'
+              for i in range(n)]
+    body = "".join(f"--B\r\n{part}\r\n" for part in parts) + "--B--"
+    return ("\r\n".join(headers) + '\r\nContent-Type: multipart/mixed; boundary="B"\r\n\r\n' + body).encode()
+
+
+def sizes(raw: bytes) -> tuple[int, dict]:
+    parsed = parse_bytes(raw)
+    checks = run_checks(parsed)
+    return (len(parsed.parse_warnings + received_warnings(parsed)),
+            {check.name: (check.result, len(check.caveats), len(check.evidence)) for check in checks})
+
+
+def test_repeating_every_item_doesnt_grow_the_warnings_caveats_or_evidence():
+    # Indicators and attachments are listed in full, since each is acted on. The two lookup
+    # checks are left out, since a run's lookups are limited. Both sizes have more From
+    # addresses than a check reads, which on its own makes a pass inconclusive.
+    (few_warnings, few), (many_warnings, many) = sizes(repeated(MAX_FROMS + 1)), sizes(repeated(60))
+    assert many_warnings == few_warnings
+    assert many.keys() == few.keys()
+    for name, (result, caveats, evidence) in few.items():
+        assert many[name][:2] == (result, caveats), name
+        # Counts like "(and 1 more)" are a digit longer
+        assert many[name][2] - evidence <= 6, name
 
 
 def test_damaged_emails():

@@ -252,6 +252,16 @@ def test_reply_to(reply_tos, expected):
 def test_reply_to_evidence():
     check = reply_to_check("alice@example.org", "x@evil.net", "y@evil.net", "undisclosed")
     assert check.evidence == "Replies go to evil.net, undisclosed, not example.org"
+    check = reply_to_check(", ".join(f"x@d{n}.com" for n in range(6)))
+    assert check.evidence == "Replies go to d0.com, d1.com, d2.com, d3.com, d4.com (and 1 more), not example.org"
+
+
+def test_several_encoded_reply_to_addresses_are_one_caveat():
+    check = reply_to_check("=?utf-8?q?a?=@evil.net, =?utf-8?q?b?=@evil.net")
+    assert check.result == FLAG
+    assert check.caveats == [
+        "2 addresses have encoded text in them, which isn't allowed in an address. Some mail clients decode them "
+        "and show a@evil.net for =?utf-8?q?a?=@evil.net; b@evil.net for =?utf-8?q?b?=@evil.net."]
 
 
 @pytest.mark.parametrize("from_addr, reply_to, expected", [

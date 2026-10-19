@@ -234,6 +234,7 @@ def test_your_own_domains_age_isnt_in_question(monkeypatch):
 
 
 HOPS = [(2, "a.prod.outlook.com", "2603:10b6::1"), (3, "b.prod.outlook.com", "2603:10b6::2")]
+SIX_HOPS = [(n + 2, f"h{n}.prod.outlook.com", f"2603:10b6::{n + 10}") for n in range(6)]
 
 
 def test_hops_named_as_microsofts_go_after_the_origin(server, keys):
@@ -283,12 +284,15 @@ SKIPPED = [Reputation("AbuseIPDB", LookupStatus.SKIPPED, "skipped, over the limi
      "Every hop named as a Microsoft server has a Microsoft IP, in Received headers 2, 3"),
     (HOPS[:1], {"2603:10b6::1": owned_by("microsoft.com")}, Result.PASS,
      "Every hop named as a Microsoft server has a Microsoft IP, in Received header 2"),
+    (SIX_HOPS, {ip: owned_by("microsoft.com") for _, _, ip in SIX_HOPS}, Result.PASS,
+     "Every hop named as a Microsoft server has a Microsoft IP, in Received headers 2, 3, 4, 5, 6 (and 1 more)"),
     (HOPS, {"2603:10b6::1": owned_by(""), "2603:10b6::2": SKIPPED}, Result.INCONCLUSIVE,
      "Who owns these isn't known: Received header 2 (2603:10b6::1): AbuseIPDB doesn't list an owner; "
      "Received header 3 (2603:10b6::2): skipped, over the limit of 10 lookups a run"),
     (HOPS[:1], {}, Result.INCONCLUSIVE, "Who owns these isn't known: Received header 2 (2603:10b6::1): not looked up"),
     ([], {}, Result.PASS, "No hop was taken as Microsoft's on its name alone"),
-], ids=["faked", "two faked", "faked above unknown", "all Microsoft's", "one", "unknown", "not looked up", "none"])
+], ids=["faked", "two faked", "faked above unknown", "all Microsoft's", "one", "six", "unknown", "not looked up",
+        "none"])
 def test_microsoft_hops(hops, results, result, evidence):
     check = check_microsoft_hops(Origin(None, None, "x.outlook.com", microsoft_hops=hops), results)
     assert (check.result, check.evidence, check.caveats) == (result, evidence, [])

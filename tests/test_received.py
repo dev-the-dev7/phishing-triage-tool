@@ -97,6 +97,9 @@ def test_warning_names_the_header():
     warnings = received_warnings(ParsedEmail(received=[HOP_FORMATS[0][0], f"from 203.0.113.5 by x; {DATE}"]))
     assert warnings == ["Received header 2 has an IP in a format the tool can't read, so the origin may be "
                         "wrong. Check that header by hand."]
+    warnings = received_warnings(ParsedEmail(received=[f"from 203.0.113.{n} by x; {DATE}" for n in range(6)]))
+    assert warnings == ["Received headers 1, 2, 3, 4, 5 (and 1 more) have an IP in a format the tool can't read, so "
+                        "the origin may be wrong. Check those headers by hand."]
 
 
 GOOGLE_RELAY = f"from mail-sor-f41.google.com (mail-sor-f41.google.com. [209.85.220.41]) by mx.google.com; {DATE}"

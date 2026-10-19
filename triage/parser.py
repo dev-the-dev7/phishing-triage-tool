@@ -10,7 +10,7 @@ from .domains import urls_in_text
 from .html_reader import read_html
 from .iocs import defang
 from .link_wrappers import destinations, through_google
-from .models import Address, Attachment, Link, ParsedEmail, join_first_five
+from .models import Address, Attachment, Link, ParsedEmail, encoded_addresses, join_first_five
 
 # Microsoft 365's largest allowed message. A bigger file isn't a real email, and the
 # email library needs several times the file's size in memory.
@@ -59,9 +59,15 @@ def _parse_message(raw: bytes) -> ParsedEmail:
     warnings = []
     from_addrs = _addresses(msg, "From", warnings, every_header=True)
     # Reported phish often arrive as an attachment, and the checks would read the forward
-    for name in _attached_emails(msg):
-        warnings.append(f"{name} is an email attached to this one. If this is a forwarded report, "
-                        "the checks ran on the wrapper. Save the attachment and run the tool on it.")
+    attached = _attached_emails(msg)
+    if len(attached) == 1:
+        warnings.append(f"{attached[0][:1].upper() + attached[0][1:]} is an email attached to this one. If this "
+                        "is a forwarded report, the checks ran on the wrapper. Save the attachment and run the tool "
+                        "on it.")
+    elif attached:
+        warnings.append(f"{len(attached)} emails are attached to this one: {join_first_five(attached, ', ')}. If "
+                        "this is a forwarded report, the checks ran on the wrapper. Save them and run the tool on "
+                        "each.")
 
     # One of each is allowed, but like From and Reply-To, the email can have more
     sender = _addresses(msg, "Sender", warnings, every_header=True)
@@ -70,9 +76,9 @@ def _parse_message(raw: bytes) -> ParsedEmail:
     # In From and Reply-To, encoded text is a check's evidence. No check reads what a client
     # shows for these, so it's a warning.
     for name, found in (("Sender", sender), ("Return-Path", return_path), ("To", to)):
-        warnings += [f"{name} address {address.email} has encoded text in it, which isn't allowed in an "
-                     f"address. Some mail clients decode it and show {address.decoded}"
-                     for address in found if address.decoded]
+        encoded = [address for address in found if address.decoded]
+        if encoded:
+            warnings.append(encoded_addresses(encoded, name))
     text_body = "\n".join(_shown_texts(msg, "plain", warnings))
     html_parts = _shown_texts(msg, "html", warnings)
     collected = [read_html(html, warnings) for html in html_parts]
@@ -110,7 +116,8 @@ def _parse_message(raw: bytes) -> ParsedEmail:
         other_urls=[url for part in collected for url in part.other_urls],
         base_tags=max((part.bases for part in collected), default=0),
         attachments=_attachments(msg),
-        parse_warnings=warnings,
+        # Once each, since one can come from every body part, like an unknown charset
+        parse_warnings=list(dict.fromkeys(warnings)),
     )
 
 
@@ -190,9 +197,7 @@ def _decode_words(text: str, name: str, warnings) -> str:
     # client shows, so padding a display name can't push a brand name out of it.
     start, rest = text[:MAX_HEADER_LENGTH], text[MAX_HEADER_LENGTH:]
     if rest:
-        warning = f"{name} has text over {MAX_HEADER_LENGTH:,} characters long, only the start was decoded"
-        if warning not in warnings:
-            warnings.append(warning)
+        warnings.append(f"{name} has text over {MAX_HEADER_LENGTH:,} characters long, only the start was decoded")
     return str(email.policy.default.header_factory("Decoded", start)) + rest
 
 
@@ -249,7 +254,7 @@ def _attached_emails(msg) -> list[str]:
         filename = part.get_filename() or ""
         is_email_type = part.get_content_type() in ("message/rfc822", "message/global")
         if is_email_type or filename.lower().endswith((".eml", ".msg")):
-            names.append(f'"{filename}"' if filename else "An unnamed part")
+            names.append(f'"{filename}"' if filename else "an unnamed part")
     return names
 
 

@@ -210,7 +210,7 @@ def check_microsoft_hops(origin: Origin | None, results: dict[str, list[Reputati
         return Check(name, Result.INCONCLUSIVE, strength, f"Who owns these isn't known: {join_first_five(unknown)}")
     if hops:
         headers = "header" if len(hops) == 1 else "headers"
-        numbers = ", ".join(str(position) for position, _, _ in hops)
+        numbers = join_first_five([str(position) for position, _, _ in hops], ", ")
         return Check(name, Result.PASS, strength, f"Every hop named as a Microsoft server has a Microsoft IP, in "
                                                   f"Received {headers} {numbers}")
     return Check(name, Result.PASS, strength, "No hop was taken as Microsoft's on its name alone")

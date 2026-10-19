@@ -5,7 +5,7 @@ import pytest
 
 from triage import models
 from triage.checks import run_checks
-from triage.models import Check, Result, join_first_five
+from triage.models import Address, Check, Result, encoded_addresses, join_first_five
 from triage.parser import parse_bytes
 
 PASS, FLAG, INCONCLUSIVE = Result.PASS, Result.FLAG, Result.INCONCLUSIVE
@@ -25,6 +25,17 @@ def test_check_refuses_a_typo():
 ])
 def test_join_first_five(count, expected):
     assert join_first_five([str(n) for n in range(1, count + 1)]) == expected
+
+
+def test_encoded_addresses_are_one_sentence():
+    addresses = [Address("", f"=?q?{n}?=@evil.com", "evil.com", f"{n}@paypal.com") for n in range(7)]
+    assert encoded_addresses(addresses[:1], "To") == (
+        "To address =?q?0?=@evil.com has encoded text in it, which isn't allowed in an address. Some mail clients "
+        "decode it and show 0@paypal.com")
+    assert encoded_addresses(addresses) == (
+        "7 addresses have encoded text in them, which isn't allowed in an address. Some mail clients decode them and "
+        "show 0@paypal.com for =?q?0?=@evil.com; 1@paypal.com for =?q?1?=@evil.com; 2@paypal.com for "
+        "=?q?2?=@evil.com; 3@paypal.com for =?q?3?=@evil.com; 4@paypal.com for =?q?4?=@evil.com (and 2 more)")
 
 
 def checks_of(*header_lines: str) -> dict[str, Check]:

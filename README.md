@@ -107,6 +107,14 @@ includes the company's root certificate.
   tool couldn't parse, an unknown charset, or an email attached to this one, so that part
   needs checking by hand.
 
+- **At most five of anything a sender can repeat are named,** with a count of the rest, in
+  evidence, caveats, and warnings, so padding an email with thousands of headers or links
+  can't bury the findings or warnings. Warnings are grouped by kind instead of cut off at
+  a number, since a cut would let a flood of one kind push out another. Indicators and
+  attachments are listed in full, since each one may need blocking or checking, and so are
+  the SPF, DKIM, and DMARC results your provider reports, since the worst one decides the
+  check.
+
 - **The report puts flags first, strongest first,** then inconclusive checks, then passes.
   Its summary gives the strongest flag and the count of each result. The strongest flag
   isn't a score: two weak flags don't add up to a medium one, since they can be the same

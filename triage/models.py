@@ -69,10 +69,22 @@ class Check:
         self.strength = Strength(self.strength)
 
 
-def join_first_five(items: list[str]) -> str:
+def join_first_five(items: list[str], separator: str = "; ") -> str:
     # Evidence lists stop at five, so one email with dozens of links can't bury the note
     extra = f" (and {len(items) - 5} more)" if len(items) > 5 else ""
-    return "; ".join(items[:5]) + extra
+    return separator.join(items[:5]) + extra
+
+
+def encoded_addresses(addresses: list[Address], header: str = "") -> str:
+    # One sentence for any number of them, so a thousand can't bury the report
+    if len(addresses) == 1:
+        named = f"{header} address {addresses[0].email}" if header else addresses[0].email
+        return (f"{named} has encoded text in it, which isn't allowed in an address. Some mail clients decode it "
+                f"and show {addresses[0].decoded}")
+    named = f"{len(addresses)} {header} addresses" if header else f"{len(addresses)} addresses"
+    shown = join_first_five([f"{address.decoded} for {address.email}" for address in addresses])
+    return (f"{named} have encoded text in them, which isn't allowed in an address. Some mail clients decode "
+            f"them and show {shown}")
 
 
 def for_each_from(from_addrs: list[Address], check: Callable[[Address | None], Check]) -> Check:
@@ -84,7 +96,7 @@ def for_each_from(from_addrs: list[Address], check: Callable[[Address | None], C
         return runs[0]
     result = next(r for r in (Result.FLAG, Result.INCONCLUSIVE, Result.PASS) if any(c.result == r for c in runs))
     matching = [run for run in runs if run.result == result]
-    evidence = "; ".join(dict.fromkeys(run.evidence for run in matching))
+    evidence = join_first_five(list(dict.fromkeys(run.evidence for run in matching)))
     if result == Result.PASS and unchecked:
         result = Result.INCONCLUSIVE
         evidence += f". Only the first {len(runs)} of {len(from_addrs):,} From addresses were checked"

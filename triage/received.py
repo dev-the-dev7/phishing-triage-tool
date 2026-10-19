@@ -4,7 +4,7 @@ import ipaddress
 import re
 
 from .domains import base_domain, has_ip, is_internal_ip
-from .models import Origin, ParsedEmail
+from .models import Origin, ParsedEmail, join_first_five
 
 MICROSOFT_SERVER_DOMAINS = {"outlook.com", "office365.com", "exchangelabs.com"}
 
@@ -41,13 +41,18 @@ def _handoff_index(hops: list[dict]) -> int | None:
 def received_warnings(parsed: ParsedEmail) -> list[str]:
     # A header with an IP the tool can't read is skipped, and if it was the handoff, the origin
     # is wrong. Headers with no IP are normal (Gmail's API) and aren't reported.
-    warnings = []
+    unread = []
     for position, header in enumerate(parsed.received, 1):
         parts = _split_received(header)
         if parts and _read_hop(header) is None and has_ip(parts[0]):
-            warnings.append(f"Received header {position} has an IP in a format the tool can't read, "
-                            "so the origin may be wrong. Check that header by hand.")
-    return warnings
+            unread.append(str(position))
+    if len(unread) == 1:
+        return [f"Received header {unread[0]} has an IP in a format the tool can't read, so the origin may be "
+                "wrong. Check that header by hand."]
+    if unread:
+        return [f"Received headers {join_first_five(unread, ', ')} have an IP in a format the tool can't read, so "
+                "the origin may be wrong. Check those headers by hand."]
+    return []
 
 
 def _read_hops(parsed: ParsedEmail) -> list[dict]:
