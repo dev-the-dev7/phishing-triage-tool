@@ -408,5 +408,7 @@ def _cut(text: str, limit: int) -> str:
 def _escape(text: str) -> str:
     # Control, invisible and line-breaking characters shown as codes: terminal codes can
     # rewrite lines above, a line separator can start a fake result line, and a right-to-left
-    # override shows invoice<RLO>fdp.exe as invoiceexe.pdf
-    return "".join(ascii(ch)[1:-1] if unicodedata.category(ch) in ("Cc", "Cf", "Zl", "Zp") else ch for ch in text)
+    # override shows invoice<RLO>fdp.exe as invoiceexe.pdf. A lone surrogate can't be written
+    # to a file at all.
+    return "".join(ascii(ch)[1:-1] if unicodedata.category(ch) in ("Cc", "Cf", "Cs", "Zl", "Zp") else ch
+                   for ch in text)

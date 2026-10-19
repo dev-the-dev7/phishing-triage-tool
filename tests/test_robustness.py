@@ -35,9 +35,9 @@ def triage(raw: bytes) -> None:
         # Anything outside ASCII, control characters included, is written as an escape code
         assert render_json(report).isascii()
         for text in (render_text(report), render_markdown(report), render_summary(report, ["note.md"])):
-            # Shown as codes, so nothing from the email can move the cursor, reorder the text or
-            # start a line of its own
-            unescaped = [c for c in text if c != "\n" and unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp")]
+            # Shown as codes, so nothing from the email can move the cursor, reorder the text,
+            # start a line of its own or stop the note being written
+            unescaped = [c for c in text if c != "\n" and unicodedata.category(c) in ("Cc", "Cf", "Cs", "Zl", "Zp")]
             assert not unescaped, f"shown as they are: {unescaped}"
 
 

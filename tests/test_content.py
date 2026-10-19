@@ -28,6 +28,12 @@ def test_shown_text():
     ("a:after{content:'paypal.com'}", '"paypal.com"'),
     # Escapes are decoded: \2e is a dot
     (r'.x::before{content:"\2e"}', '"."'),
+    # The last character there is, and what CSS reads as the replacement character: one past
+    # it, which Python can't make, a surrogate, which can't be written to a file, and zero
+    (r'.x::before{content:"a\10FFFF"}', '"a\U0010ffff"'),
+    (r'.x::before{content:"a\110000"}', '"a\N{REPLACEMENT CHARACTER}"'),
+    (r'.x::before{content:"a\D800"}', '"a\N{REPLACEMENT CHARACTER}"'),
+    (r'.x::before{content:"a\0"}', '"a\N{REPLACEMENT CHARACTER}"'),
     ('.x::before{CONTENT: "@"}', '"@"'),
     # Text from an attribute
     (".x::after{content: attr(title)}", '"attr(title)"'),

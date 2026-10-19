@@ -365,9 +365,10 @@ def _css_added_text(css: str) -> list[str]:
 
 
 def _css_unescape(match) -> str:
-    # \2e is a dot. Past the last character there is, it's the replacement character, as in CSS.
+    # \2e is a dot. Zero, a surrogate, or a number past the last character is the replacement
+    # character, as in CSS.
     number = int(match.group(1), 16)
-    return chr(number) if number <= 0x10FFFF else "\ufffd"
+    return chr(number) if 0 < number <= 0x10FFFF and not 0xD800 <= number <= 0xDFFF else "\ufffd"
 
 
 def _hidden_in_words(pieces) -> list[str]:

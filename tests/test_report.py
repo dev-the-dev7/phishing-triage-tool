@@ -51,12 +51,14 @@ def test_email_lines_leave_out_what_isnt_there():
 
 def test_text_from_the_email_cant_add_lines_or_hide_characters():
     # A newline in an encoded Subject could print a fake PASS line under it. Viewers and
-    # JavaScript break lines at a line separator too.
+    # JavaScript break lines at a line separator too. A lone surrogate would stop the note
+    # being written.
     report = report_of(subject="Invoice\n  PASS         strong  DMARC: ok\N{LINE SEPARATOR}",
-                       warnings=["name\N{RIGHT-TO-LEFT OVERRIDE}fdp.exe"])
+                       warnings=["name\N{RIGHT-TO-LEFT OVERRIDE}fdp.exe", "half \ud800"])
     text = render_text(report)
     assert text.splitlines()[0] == r"Phishing triage: Invoice\n  PASS         strong  DMARC: ok\u2028"
     assert "name\\u202efdp.exe" in text
+    assert r"half \ud800" in render_markdown(report)
 
 
 def test_long_text_is_cut_in_the_middle():
