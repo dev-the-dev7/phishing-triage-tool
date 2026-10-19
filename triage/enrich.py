@@ -73,9 +73,13 @@ KNOWN_DOMAINS = {domain for domains in BRANDS.values() for domain in domains} | 
 PICTURE_ENDINGS = (".png", ".jpg", ".jpeg", ".gif", ".bmp")
 
 
-def _cache_file() -> Path:
-    # The user's cache folder, outside the repository
-    folder = os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
+def _cache_file() -> Path | None:
+    # The user's cache folder, outside the repository. This runs when the tool starts, and a
+    # stripped-down environment can have no home folder, so then only the cache is skipped.
+    try:
+        folder = os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache"
+    except RuntimeError:
+        return None
     return Path(folder) / "phishing-triage" / "lookups.json"
 
 
@@ -533,6 +537,8 @@ def _cache_key(service: str, kind: str, value: str) -> str:
 
 def _read_cache() -> dict:
     # A missing, damaged or older file reads as empty
+    if CACHE_FILE is None:
+        return {}
     try:
         saved = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError, RecursionError):
@@ -549,6 +555,10 @@ def _read_cache() -> dict:
 
 def _write_cache(cache: dict) -> None:
     # Written next to the old file and swapped in, so a failed write can't leave half a file
+    if CACHE_FILE is None:
+        print("Note: the lookups couldn't be saved for next time (there's no home folder, and XDG_CACHE_HOME "
+              "isn't set)", file=sys.stderr)
+        return
     try:
         CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
         written = CACHE_FILE.with_name(CACHE_FILE.name + ".new")

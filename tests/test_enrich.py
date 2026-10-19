@@ -766,3 +766,20 @@ def test_the_cache_is_in_your_cache_folder(monkeypatch, env, folder):
     for name, value in env.items():
         monkeypatch.setenv(name, value)
     assert enrich._cache_file() == folder / "phishing-triage" / "lookups.json"
+
+
+def test_without_a_home_folder_only_the_cache_is_skipped(server, keys, capsys, monkeypatch):
+    # A stripped-down environment can have none, and the cache path is found when the tool starts
+    def no_home():
+        raise RuntimeError("Could not determine home directory.")
+
+    for name in ("LOCALAPPDATA", "XDG_CACHE_HOME"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(Path, "home", no_home)
+    assert enrich._cache_file() is None
+    monkeypatch.setattr(enrich, "CACHE_FILE", None)
+    server.answers[f"{VT}/domains/evil.com"] = (200, vt_report(undetected=60))
+    assert texts(look_up(Indicators(domains=["evil.com"]))) == {
+        "evil.com": ["VirusTotal: 0 of 60 engines flagged it malicious, last checked 2026-10-12"]}
+    assert capsys.readouterr().err == ("Note: the lookups couldn't be saved for next time (there's no home folder, "
+                                       "and XDG_CACHE_HOME isn't set)\n")

@@ -486,11 +486,13 @@ includes the company's root certificate.
   many indicators it covered, instead of under each one.
 
 - **Found results are kept for a day** in your own cache folder
-  (`%LOCALAPPDATA%\phishing-triage` on Windows), so running the tool again doesn't use up
-  the limits. Not found isn't kept, and neither is a report no engine has checked yet,
-  since either can change within the hour. Each entry is filed under a hash of what was
-  sent, so the file isn't a readable list of what you've looked up, and the same
-  campaign's link with each reader's address after `#` is only looked up once.
+  (`%LOCALAPPDATA%\phishing-triage` on Windows, under `$XDG_CACHE_HOME` or `~/.cache`
+  elsewhere), so running the tool again doesn't use up the limits. If none of these can
+  be found, as in some stripped-down environments, nothing is kept and the tool says so.
+  Not found isn't kept, and neither is a report no engine has checked yet, since either
+  can change within the hour. Each entry is filed under a hash of what was sent, so the
+  file isn't a readable list of what you've looked up, and the same campaign's link with
+  each reader's address after `#` is only looked up once.
 
 - **The keys come from environment variables**, never from a file in the repository, and
   are sent in a request header, never in the address, so they stay out of error messages
