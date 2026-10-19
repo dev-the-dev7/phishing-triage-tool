@@ -231,6 +231,8 @@ def test_names_under_four_letters_arent_typo_checked(monkeypatch):
     "mywellsfargo.com",
     # Short names joined to a word phishers use
     "appleid.com", "applesupport.com", "mymeta.com", "metaverify.com", "fedexdelivery.com", "chaseonline.com",
+    # Other words in the domain don't end the search
+    "secure-account-verify-appleid.com",
 ])
 def test_brand_joined_to_a_word_flags(domain):
     check = check_brand_joined(link_to(domain))
@@ -335,7 +337,7 @@ def test_organization_is_named_once():
     # and still checks the brands listed after them (docusign)
     assert check_display_name(sent_as("Microsoft Office 365 DocuSign")).evidence.count("mentions") == 2
     assert check_lookalike(link_to("microsoft-office365-docusign.com")).evidence.count("[link]") == 2
-    assert check_brand_joined(link_to("mymicrosoftoffice365.com")).evidence.count("[link]") == 1
+    assert check_brand_joined(link_to("mymicrosoftoffice365docusign.com")).evidence.count("[link]") == 2
 
 
 def test_link_to_the_real_brand_doesnt_end_the_check():

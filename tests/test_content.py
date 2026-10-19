@@ -46,9 +46,11 @@ def test_shown_text():
 ])
 def test_css_that_adds_text_flags(css, text):
     parsed = html_email(f"<style>{css}</style><p>Hello</p>")
-    assert [(c.result, c.strength, c.evidence) for c in check_css_added_text(parsed)] == [
-        (Result.FLAG, Strength.WEAK, f"CSS adds {text} to what the email shows, and the tool doesn't read CSS. "
-         "Check what the email looks like in a mail client.")]
+    # By its name too, which the link check's caveat points to
+    assert [(c.name, c.result, c.strength, c.evidence) for c in check_css_added_text(parsed)] == [
+        ("Text added by CSS", Result.FLAG, Strength.WEAK,
+         f"CSS adds {text} to what the email shows, and the tool doesn't read CSS. Check what the email looks "
+         "like in a mail client.")]
     assert parsed.parse_warnings == []
 
 
@@ -105,9 +107,9 @@ def test_text_hidden_inside_a_word(html, found):
     parsed = html_email(html)
     assert parsed.hidden_in_words == [found]
     check = check_hidden_text(parsed)
-    assert [(c.result, c.evidence) for c in check] == [
-        (Result.FLAG, "Text is hidden inside words, so filters read something other than what the reader sees: "
-         + found)]
+    assert [(c.name, c.result, c.evidence) for c in check] == [
+        ("Hidden text", Result.FLAG,
+         "Text is hidden inside words, so filters read something other than what the reader sees: " + found)]
 
 
 @pytest.mark.parametrize("html", [
@@ -146,9 +148,9 @@ def test_hidden_text_that_isnt_inside_a_word(html):
 ])
 def test_email_that_is_only_an_image(html):
     check = check_image_only(html_email(html))
-    assert [(c.result, c.evidence) for c in check] == [
-        (Result.FLAG, "The email shows images and no text. Any text or QR code in them can't be checked, "
-         "so look at them by hand, and don't scan a QR code to see where it goes.")]
+    assert [(c.name, c.result, c.evidence) for c in check] == [
+        ("Image only", Result.FLAG, "The email shows images and no text. Any text or QR code in them can't be "
+         "checked, so look at them by hand, and don't scan a QR code to see where it goes.")]
 
 
 @pytest.mark.parametrize("html", [

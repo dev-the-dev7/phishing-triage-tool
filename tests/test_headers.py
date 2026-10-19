@@ -307,6 +307,8 @@ def test_several_encoded_reply_to_addresses_are_one_caveat():
     ("alice@gmail.com", "bob@gmail.com", FLAG),
     ("alice@gmail.com", "Alice@Gmail.com", PASS),
     ("Alice@Gmail.com", "alice@gmail.com", PASS),
+    # And on a provider's own subdomain, like QQ's paid vip.qq.com
+    ("alice@vip.qq.com", "bob@qq.com", FLAG),
     # The same goes for each customer's subdomain on a hosting service
     ("alice@alice.appspot.com", "x@evil.appspot.com", FLAG),
 ])
