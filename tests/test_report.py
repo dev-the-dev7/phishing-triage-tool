@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from triage.models import Address, Attachment, Check, Indicators, LookupStatus, Origin, ParsedEmail, Reputation
 from triage.report import build_report, build_text_report, render_json, render_markdown, render_summary, render_text
 
@@ -73,6 +75,14 @@ def test_a_padded_name_cant_hide_the_address():
     assert email[0].endswith('" <attacker@evil.com>')
     assert email[1] == ("  To:          user0@example.net; user1@example.net; user2@example.net; user3@example.net; "
                         "user4@example.net (and 2 more)")
+
+
+def test_a_backslash_in_a_name_cant_end_its_quotes():
+    # Unescaped, the backslash would escape the quote's backslash, the quote would close the
+    # name, and the address after it would read as the sender's
+    sender = Address(r'PayPal\" <service@paypal.com>', "attacker@evil.com", "evil.com")
+    from_line = section(render_text(report_of(from_addrs=[sender])), "Email")[0]
+    assert from_line == r'  From:        "PayPal\\\" <service@paypal.com>" <attacker@evil.com>'
 
 
 def test_cutting_a_name_keeps_its_quotes_escaped():
@@ -166,6 +176,7 @@ def test_a_note_with_nothing_flagged_or_no_sender():
     note = render_markdown(report_of([Check("SPF", "pass", "medium", "spf=pass")], from_addrs=[]))
     assert note_section(note, "## Signals") == ["None."]
     assert note_section(note, "## Inconclusive") == ["None."]
+    assert note_section(note, "## Indicators") == ["None found."]
     assert note_section(note, "## Summary")[1] == "- From: (missing)"
     assert [line for line in note_section(note, "## Typical follow-ups if confirmed malicious")
             if line.startswith("  -")] == []
@@ -235,6 +246,27 @@ def test_text_in_the_note_cant_make_links_or_formatting():
     assert "- Message-ID: `` `1[@]evil[.]com` ``" in note_section(note, "## Summary")
 
 
+@pytest.mark.parametrize("subject, heading", [
+    # A backtick at either end would join the fence, and a space there would be taken off, so
+    # both get a space of padding at each end
+    ("`x", "`` `x ``"),
+    ("x`", "`` x` ``"),
+    (" x", "`  x `"),
+    ("x ", "` x  `"),
+    # The fence is longer than the longest run of backticks inside, or the shorter one closes it
+    ("a``b`c", "```a``b`c```"),
+])
+def test_text_in_a_code_span_cant_close_it(subject, heading):
+    assert render_markdown(report_of(subject=subject)).splitlines()[0] == f"# Phishing triage: {heading}"
+
+
+def test_hashes_are_named_by_their_length():
+    # Alert text can give MD5 and SHA-1, which attachments never get
+    found = Indicators(hashes=["a" * 32, "b" * 40, "c" * 64])
+    assert section(render_text(build_text_report(found, {})), "Indicators, defanged") == [
+        "  MD5      " + "a" * 32, "  SHA-1    " + "b" * 40, "  SHA-256  " + "c" * 64]
+
+
 def test_the_indicators_table():
     found = Indicators(urls=["https://evil.com/p|q"], domains=["evil.com", "a.com"])
     vt = Reputation("VirusTotal", LookupStatus.FOUND, "9 of 90 engines flagged it malicious")
@@ -251,6 +283,9 @@ def test_the_indicators_table():
         "| Domain | `a[.]com` |  |",
         "- Not looked up: VirusTotal: skipped, over the limit of 8 lookups a run (1 indicator, the one with no "
         "VirusTotal result)"]
+    # One result is enough for the column, with no lookup missed for the run
+    note = render_markdown(build_text_report(found, {"evil.com": [vt]}))
+    assert note_section(note, "## Indicators")[0] == "| Type | Indicator, defanged | Reputation |"
 
 
 def test_a_note_for_alert_text_has_no_email_sections():
@@ -280,6 +315,21 @@ def test_the_json_holds_the_same_report():
                                                                   "text": "3 of 90", "facts": {"malicious": 3}}]}]
     assert data["analyst"] == {"verdict": None, "actions_taken": None}
     assert len(data["follow_ups"]) == 3
+
+
+def test_the_json_names_each_lookup_status():
+    # Tools reading the JSON match on these, so they're part of its format
+    over = Reputation("VirusTotal", LookupStatus.SKIPPED, "skipped, over the limit of 8 lookups a run",
+                      for_the_run=True)
+    results = {"a.com": [Reputation("VirusTotal", LookupStatus.NOT_FOUND, "not found (unknown, not clean)")],
+               "b.com": [Reputation("VirusTotal", LookupStatus.SKIPPED, "skipped, one of your own domains")],
+               "c.com": [Reputation("VirusTotal", LookupStatus.UNAVAILABLE, "unavailable, error 500")],
+               "d.com": [over]}
+    data = json.loads(render_json(build_text_report(Indicators(domains=list(results)), results)))
+    assert [[lookup["status"] for lookup in row["lookups"]] for row in data["indicators"]] == [
+        ["not found"], ["skipped"], ["unavailable"], []]
+    assert data["not_looked_up"] == [{"service": "VirusTotal", "text": "skipped, over the limit of 8 lookups a run",
+                                      "count": 1}]
 
 
 def test_json_for_alert_text():

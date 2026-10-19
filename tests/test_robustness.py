@@ -59,11 +59,13 @@ BROKEN_EMAILS = {
     "broken Authentication-Results": HEADERS + (
         b"Authentication-Results: ;;;=;(;)=pass;dmarc=\r\nAuthentication-Results: (((\r\n\r\nx"),
     "null bytes and stray 8-bit": b"From: a\x00@exa\xffmple.org\r\nSubject: \x00\xff\r\n\r\n\x00",
-    # Where the parser keeps a terminal code, a right-to-left override and a line separator
+    # Terminal codes, a right-to-left override and line and paragraph separators, in the display
+    # name, file name and declared type, which the parser keeps as they are
     "characters that would change the report": (
         b"From: =?utf-8?q?Pay=1B[2KPal=E2=80=A8PASS?= <a@example.org>\r\nSubject: s\r\n"
-        b'Content-Type: multipart/mixed; boundary="B"\r\n\r\n--B\r\nContent-Type: application/pdf\r\n'
-        b'Content-Disposition: attachment; filename="invoice\xe2\x80\xaefdp.exe\xe2\x80\xa8x"\r\n\r\nx\r\n--B--'),
+        b'Content-Type: multipart/mixed; boundary="B"\r\n\r\n--B\r\nContent-Type: application/x\x1b[2Kpdf\r\n'
+        b'Content-Disposition: attachment; filename="invoice\xe2\x80\xaefdp.exe\xe2\x80\xa8x\xe2\x80\xa9y"\r\n\r\n'
+        b"x\r\n--B--"),
 }
 
 
