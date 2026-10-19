@@ -107,27 +107,65 @@ def test_method_and_result_names_ignore_case():
     assert checks["DKIM"].evidence == "dkim=pass for paypal.com (from mx.google.com)"
 
 
+def gmail_header(mailfrom: str) -> str:
+    # The provider copies the sender's envelope address into its header, in a comment and
+    # in smtp.mailfrom, the way Gmail does
+    return (f"mx.google.com; dkim=fail header.i=@paypal.com header.s=s1 header.b=AbCd; "
+            f"spf=pass (google.com: domain of {mailfrom} designates 203.0.113.5 as permitted "
+            f"sender) smtp.mailfrom={mailfrom}; dmarc=fail header.from=paypal.com")
+
+
 @pytest.mark.parametrize("mailfrom", [
     '"x;dkim=pass"@evil.com',
+    # An escaped quote doesn't end the quoted part, or an escaped bracket the comment
+    '"x\\";dkim=pass header.i=@paypal.com"@evil.com',
+    '"x\\);dkim=pass header.i=@paypal.com"@evil.com',
     # Encoded words are valid in an address, and decoding them gives x;dkim=pass@evil.com
     "=?utf-8?q?x=3Bdkim=3Dpass?=@evil.com",
     "=?utf-8?b?eDtka2ltPXBhc3M=?=@evil.com",
     "=?utf-8?q?x=3Bdkim=3Dpass=20header=2Ei=3D=40paypal=2Ecom?=@evil.com",
 ])
 def test_the_envelope_address_cant_add_a_dkim_pass(mailfrom):
-    # The provider copies the sender's envelope address into its header, in a comment and
-    # in smtp.mailfrom, the way Gmail does
-    checks = authenticate(f"mx.google.com; dkim=fail header.i=@paypal.com header.s=s1 header.b=AbCd; "
-                          f"spf=pass (google.com: domain of {mailfrom} designates 203.0.113.5 as permitted "
-                          f"sender) smtp.mailfrom={mailfrom}; dmarc=fail header.from=paypal.com")
+    checks = authenticate(gmail_header(mailfrom))
     assert checks["DKIM"].result == FLAG
     assert checks["DKIM"].evidence == "dkim=fail for paypal.com (from mx.google.com)"
 
 
-def test_text_in_a_comment_cant_add_a_dkim_pass():
+@pytest.mark.parametrize("mailfrom", [
+    # One quote, whose copy in the comment mustn't pair with the copy after it
+    '"x;dkim=pass header.i=@paypal.com',
+    # Outside quotes and comments a backslash is just a character, so the quote after it counts
+    'x\\";dkim=pass header.i=@paypal.com',
+    # A bracket, which opens a comment inside Gmail's and leaves it open
+    'x(;dkim=pass header.i=@paypal.com',
+])
+def test_a_quote_or_comment_left_open_hides_the_rest_and_says_so(mailfrom):
+    # The rest could be the sender's text, so it isn't read, and the report says why dmarc=fail is missing
+    checks = authenticate(gmail_header(mailfrom))
+    assert checks["DKIM"].evidence == ("dkim=fail for paypal.com (from mx.google.com, read up to a quote or "
+                                       "comment left open)")
+    assert checks["DMARC"].evidence == "Not reported (from mx.google.com, read up to a quote or comment left open)"
+
+
+def test_a_header_cut_short_cant_pass():
+    # Unquoted, the address can add a pass and then hide the real result, and which passes are
+    # real can't be told
+    checks = authenticate('mx.google.com; dkim=pass header.i=@paypal.com; spf=pass '
+                          'smtp.mailfrom=x;dmarc=pass;"@evil.com; dmarc=fail header.from=paypal.com')
+    assert [checks[name].result for name in ("SPF", "DKIM", "DMARC")] == [INCONCLUSIVE] * 3
+    assert checks["DMARC"].evidence == ("dmarc=pass (from mx.google.com, read up to a quote or comment left open). "
+                                        "The pass could be text the sender added, with the real result hidden after it")
+
+
+@pytest.mark.parametrize("comment", [
+    "(google.com: domain of x; dkim=pass header.i=@paypal.com)",
+    # A comment inside it, which doesn't end it
+    "(domain of x (y) ; dkim=pass header.i=@paypal.com )",
+])
+def test_text_in_a_comment_cant_add_a_dkim_pass(comment):
     # Comments can hold text the sender chose, like the envelope address Gmail copies into one
-    check = authenticate("mx.google.com; dkim=fail header.i=@paypal.com; "
-                         "spf=pass (google.com: domain of x; dkim=pass header.i=@paypal.com) smtp.mailfrom=evil.com")["DKIM"]
+    check = authenticate(f"mx.google.com; dkim=fail header.i=@paypal.com; spf=pass {comment} "
+                         "smtp.mailfrom=evil.com")["DKIM"]
     assert check.result == FLAG
     assert check.evidence == "dkim=fail for paypal.com (from mx.google.com)"
 

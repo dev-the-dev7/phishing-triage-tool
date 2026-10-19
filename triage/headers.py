@@ -2,6 +2,7 @@
 free webmail."""
 
 import re
+from dataclasses import replace
 
 from .domains import base_domain
 from .lists import FREE_EMAIL_DOMAINS, TRUSTED_AUTHSERV_IDS
@@ -15,24 +16,25 @@ AUTH_FAILURES = ("fail", "softfail", "permerror")
 
 def check_spf(parsed: ParsedEmail) -> Check:
     # About the envelope sender, not the From, and medium because forwarding breaks it
-    results, source = _trusted_results(parsed)
-    return _check_single_result("SPF", results.get("spf", []), Strength.MEDIUM, source)
+    results, source, cut_short = _trusted_results(parsed)
+    return _no_pass_if(cut_short, _check_single_result("SPF", results.get("spf", []), Strength.MEDIUM, source))
 
 
 def check_dkim(parsed: ParsedEmail) -> Check:
     # Medium, since mailing lists break it
-    results, source = _trusted_results(parsed)
-    return for_each_from(parsed.from_addrs, lambda from_addr: _check_dkim(
-        results.get("dkim", []), parsed.dkim_signatures, from_addr, source))
+    results, source, cut_short = _trusted_results(parsed)
+    return _no_pass_if(cut_short, for_each_from(parsed.from_addrs, lambda from_addr: _check_dkim(
+        results.get("dkim", []), parsed.dkim_signatures, from_addr, source)))
 
 
 def check_dmarc(parsed: ParsedEmail) -> Check:
     # Strong, as the one that ties authentication to the From domain the reader sees
-    results, source = _trusted_results(parsed)
-    return for_each_from(parsed.from_addrs, lambda from_addr: _check_dmarc(results.get("dmarc", []), from_addr, source))
+    results, source, cut_short = _trusted_results(parsed)
+    return _no_pass_if(cut_short, for_each_from(parsed.from_addrs, lambda from_addr: _check_dmarc(
+        results.get("dmarc", []), from_addr, source)))
 
 
-def _trusted_results(parsed: ParsedEmail) -> tuple[dict[str, list[tuple[str, str]]], str]:
+def _trusted_results(parsed: ParsedEmail) -> tuple[dict[str, list[tuple[str, str]]], str, bool]:
     if TRUSTED_AUTHSERV_IDS:
         # Only headers from your provider's servers count, as RFC 8601 recommends,
         # since anyone can write this header
@@ -43,9 +45,13 @@ def _trusted_results(parsed: ParsedEmail) -> tuple[dict[str, list[tuple[str, str
         # already in the message when it arrived, so the sender could have written it.
         trusted = parsed.auth_results[:1]
 
+    cut_short = False
     if trusted:
-        authserv_id, results = _parse_auth_results(trusted[0])
+        authserv_id, results, cut_short = _parse_auth_results(trusted[0])
         source = f"from {authserv_id}"
+        if cut_short:
+            # The sender's text can leave a quote open, and a result it hides shouldn't read as not reported
+            source += ", read up to a quote or comment left open"
     elif parsed.auth_results:
         results, source = {}, "no Authentication-Results header from a server in TRUSTED_AUTHSERV_IDS"
     else:
@@ -53,7 +59,16 @@ def _trusted_results(parsed: ParsedEmail) -> tuple[dict[str, list[tuple[str, str
     untrusted_count = len(parsed.auth_results) - min(len(trusted), 1)
     if untrusted_count:
         source += f", ignored {untrusted_count} untrusted header(s)"
-    return results, source
+    return results, source, cut_short
+
+
+def _no_pass_if(cut_short: bool, check: Check) -> Check:
+    # Outside quotes, an address like x;dmarc=pass;"@evil.com adds a pass, and its quote hides
+    # the real result. Which text is the sender's can't be told, so no pass counts.
+    if cut_short and check.result == Result.PASS:
+        evidence = f"{check.evidence}. The pass could be text the sender added, with the real result hidden after it"
+        return replace(check, result=Result.INCONCLUSIVE, evidence=evidence)
+    return check
 
 
 def _results_text(name: str, clauses: list[tuple[str, str]], source: str) -> str:
@@ -140,14 +155,12 @@ def _signed_body_length(signatures: list[str], from_base: str) -> str | None:
     return None
 
 
-def _parse_auth_results(header: str) -> tuple[str, dict[str, list[tuple[str, str]]]]:
+def _parse_auth_results(header: str) -> tuple[str, dict[str, list[tuple[str, str]]], bool]:
     # {"dkim": [("fail", "paypal.com"), ("pass", "evil.com")], ...}, with "" for no domain
 
     # Quoted strings and comments go first, since the sender controls them, and
-    # smtp.mailfrom="x;dkim=pass"@evil.com would add a fake pass. Quotes before comments,
-    # since a quoted address can hold a "(". An unclosed quote runs to the end.
-    header = re.sub(r'"(?:[^"\\]|\\.)*"?', "", header)
-    header = re.sub(r"\([^()]*\)", "", header)
+    # smtp.mailfrom="x;dkim=pass"@evil.com would add a fake pass
+    header, cut_short = _without_quotes_or_comments(header)
     first, _, rest = header.partition(";")
     if "=" in first:
         # Some providers (Microsoft) leave out the server name and start with the results
@@ -167,7 +180,32 @@ def _parse_auth_results(header: str) -> tuple[str, dict[str, list[tuple[str, str
             about = re.search(r"\bheader\.(?:[di]|from)\s*=\s*(\S+)", clause, re.I)
             domain = about.group(1).rpartition("@")[2].lower() if about else ""
             results.setdefault(m.group(1).lower(), []).append((m.group(2).lower(), domain))
-    return authserv_id, results
+    return authserv_id, results, cut_short
+
+
+def _without_quotes_or_comments(header: str) -> tuple[str, bool]:
+    # Read left to right, as RFC 5322 does, so a quote inside a comment is just a character.
+    # Taking quotes out first would pair a lone quote in a comment with the next one, after
+    # the comment, and leave the text after that to be read. A comment can hold another, and
+    # a comment or quote left open runs to the end.
+    kept, depth, quoted, escaped = [], 0, False, False
+    for ch in header:
+        if escaped:
+            escaped = False
+        elif ch == "\\" and (quoted or depth):
+            escaped = True
+        elif quoted:
+            quoted = ch != '"'
+        elif ch == "(":
+            depth += 1
+        elif depth:
+            if ch == ")":
+                depth -= 1
+        elif ch == '"':
+            quoted = True
+        else:
+            kept.append(ch)
+    return "".join(kept), bool(quoted or depth)
 
 
 def check_ambiguous_from(parsed: ParsedEmail) -> list[Check]:
