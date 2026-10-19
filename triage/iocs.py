@@ -32,7 +32,7 @@ def refang(text: str) -> str:
 
 def defang(indicator: str) -> str:
     # So a chat app, ticket system or mail client doesn't turn it into a live link
-    indicator = re.sub(r"^http(?=s?:)", "hxxp", indicator, flags=re.I)
+    indicator = re.sub(r"(?<![a-z])http(?=s?:)", "hxxp", indicator, flags=re.I)
     return indicator.replace(".", "[.]").replace("@", "[@]")
 
 

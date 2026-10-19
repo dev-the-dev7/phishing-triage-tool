@@ -34,6 +34,8 @@ def test_refang(defanged, real):
 @pytest.mark.parametrize("real, defanged", [
     ("https://evil.com/login.php", "hxxps://evil[.]com/login[.]php"),
     ("HTTP://evil.com/", "hxxp://evil[.]com/"),
+    # A link inside a link, which a ticket system would make live too
+    ("https://evil.com/?u=http://next.example/", "hxxps://evil[.]com/?u=hxxp://next[.]example/"),
     # Only a scheme is changed, not a domain that starts with http
     ("httpbin.org", "httpbin[.]org"),
     ("user@evil.com", "user[@]evil[.]com"),

@@ -313,7 +313,7 @@ def _md_indicators(report: Report) -> list[str]:
              "|---|---|---|" if looked_up else "|---|---|"]
     for row in report.indicators:
         named = f" (from the {row.named_by} check)" if row.named_by else ""
-        cells = [row.kind, _md(defang(row.value), MAX_LONG_CHARS, already_defanged=True) + named]
+        cells = [row.kind, _md(defang(row.value), MAX_LONG_CHARS) + named]
         if looked_up:
             cells.append("; ".join(f"{r.service}: {_md(r.text, MAX_LONG_CHARS)}" for r in row.results))
         # A pipe ends a table cell even inside a code span, unless it's escaped
@@ -334,9 +334,8 @@ def _md_follow_ups(report: Report) -> list[str]:
     return lines + [f"- {suggestion}" for suggestion in rest]
 
 
-def _md(text: str, limit: int = MAX_VALUE_CHARS, already_defanged: bool = False) -> str:
-    shown = _shown(text, limit)
-    return _code(shown if already_defanged else defang_text(shown))
+def _md(text: str, limit: int = MAX_VALUE_CHARS) -> str:
+    return _code(defang_text(_shown(text, limit)))
 
 
 def _code(text: str) -> str:
