@@ -91,6 +91,7 @@ def test_alert_text():
     ("See *https://evil.com/x*", "https://evil.com/x", "evil.com"),
     # A www. link with no scheme opens as http
     ("Go to www.evil.com/x, now", "http://www.evil.com/x", "www.evil.com"),
+    ("Go to WWW.evil.com/x", "http://www.evil.com/x", "www.evil.com"),
     # Written the way the browser asks for it, with the host as DNS writes it
     ("HTTP://%65vil.com/x", "http://evil.com/x", "evil.com"),
     ("https://user@evil.com:8443/x?y#z", "https://evil.com:8443/x?y#z", "evil.com"),
@@ -145,7 +146,14 @@ def test_file_names_in_a_path_arent_domains(text, domains):
     "4.3.2.1.b.a.9.8.7.6.5.0.4.0.0.0.3.0.0.0.2.0.0.0.1.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa",
 ])
 def test_numbers_that_arent_ips(text):
-    assert from_text(text).ips == []
+    found = from_text(text)
+    # Not listed as a domain either
+    assert found.ips == [] and not any(domain.replace(".", "").isdigit() for domain in found.domains)
+
+
+def test_ipv6_in_text():
+    # Two colons are enough, and a full stop after an address ends the sentence
+    assert from_text("From fe80::1, then 2001:db8::5.").ips == ["fe80::1", "2001:db8::5"]
 
 
 @pytest.mark.parametrize("text, name, ip", [
@@ -168,8 +176,20 @@ def test_hex_that_isnt_a_hash(text):
     assert from_text(text).hashes == []
 
 
+def test_a_hash_given_twice_is_listed_once():
+    # In either case, since alerts write hashes both ways
+    assert from_text(f"{MD5} and {MD5.upper()}").hashes == [MD5]
+
+
 def test_addresses_ignore_case():
-    assert from_text("Billing@PayPa1.com wrote to billing@paypa1.com").emails == ["billing@paypa1.com"]
+    # And are read whole, with plus addressing and a longer domain
+    found = from_text("Billing+x@Mail.PayPa1.co.uk wrote to billing+x@mail.paypa1.co.uk")
+    assert (found.emails, found.domains) == (["billing+x@mail.paypa1.co.uk"], ["mail.paypa1.co.uk"])
+
+
+def test_an_address_isnt_read_for_domains_too():
+    # Its local part can look like a domain, here the real brand's, and isn't one
+    assert from_text("From: service.paypal.com@evil.com").domains == ["evil.com"]
 
 
 def test_nothing_found():
@@ -223,6 +243,12 @@ def test_what_an_email_only_mentions_isnt_listed(fields):
     assert "paypal.com" not in found.domains and "evil.com" not in found.domains
     assert found.ips == []
     assert found.emails == ["service@paypa1.com"]
+
+
+def test_mailto_links_in_capitals_and_encoded():
+    # Mail clients read the scheme in any case and %40 as @
+    found = from_email(email(links=[Link("MAILTO:help%40evil.org", "Help")]), None)
+    assert found.emails == ["service@paypa1.com", "help@evil.org"]
 
 
 def test_domains_are_in_the_form_dns_uses():

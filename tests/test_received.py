@@ -87,6 +87,7 @@ def test_helo_shaped_like_the_receiver_part_is_skipped(header):
     # An IP in a format the tool doesn't read could be the handoff, so the analyst is told
     (f"from 203.0.113.5 by mta.example.org with HTTP; {DATE}", True),
     (f"from mail.example.org 203.0.113.5 by mta.example.org with HTTP; {DATE}", True),
+    (f"from 203.0.113.5. by mta.example.org with HTTP; {DATE}", True),
 ])
 def test_headers_without_a_readable_hop(header, warns):
     assert _read_hop(header) is None

@@ -143,6 +143,8 @@ def test_domains_in_text():
     # Endings that look like a real TLD to the reader: a Cyrillic es, and rn for m
     ("paypal.\N{CYRILLIC SMALL LETTER ES}om", ["paypal.\N{CYRILLIC SMALL LETTER ES}om"]),
     ("paypal.corn", ["paypal.corn"]),
+    # Read without pairs too, or the cl in a Cyrillic .cloud would read as d
+    ("evil.\N{CYRILLIC SMALL LETTER ES}loud", ["evil.\N{CYRILLIC SMALL LETTER ES}loud"]),
     # A non-English TLD (Russia's), and the same in its xn-- form, as DNS and proxy logs write it
     ("x.\N{CYRILLIC SMALL LETTER ER}\N{CYRILLIC SMALL LETTER EF}",
      ["x.\N{CYRILLIC SMALL LETTER ER}\N{CYRILLIC SMALL LETTER EF}"]),

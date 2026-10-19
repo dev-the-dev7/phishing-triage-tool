@@ -499,6 +499,8 @@ def test_abuseipdb_limit(server, monkeypatch):
     results = look_up(Indicators(ips=ips))
     assert len(server.requests) == 10
     assert [texts(results)[ip][0] for ip in ips[10:]] == ["AbuseIPDB: skipped, over the limit of 10 lookups a run"] * 2
+    # Said once for the run in the report, not under each indicator
+    assert all(results[ip][0].for_the_run for ip in ips[10:])
 
 
 @pytest.mark.parametrize("failure, reason", [
@@ -521,6 +523,7 @@ def test_a_failure_every_lookup_would_hit_stops_the_rest(server, keys, failure, 
     results = look_up(Indicators(domains=["first.com", "second.com"]))
     assert texts(results) == {"first.com": [f"VirusTotal: unavailable, {reason}"],
                               "second.com": [f"VirusTotal: unavailable, {reason}"]}
+    assert results["first.com"][0].for_the_run and results["second.com"][0].for_the_run
     assert len(server.requests) == 1
     # The key isn't shown, even when the error had it
     assert "vt-key" not in str(texts(results))
@@ -563,9 +566,11 @@ def test_abuseipdb_failure_stops_only_abuseipdb(server, keys):
 
 @pytest.mark.parametrize("failure, reason", [
     ((500, {"error": {"code": "InternalError"}}), "it answered with error 500"),
+    # One indicator it can't read, which says nothing about the others
+    ((400, {"error": {"code": "BadRequestError"}}), "it answered with error 400"),
     # JSON, so from the service, but without what a report has
     ((200, {"data": None}), "its answer couldn't be read"),
-], ids=["server error", "not a report"])
+], ids=["server error", "bad request", "not a report"])
 def test_other_failures_only_affect_that_lookup(server, keys, failure, reason):
     server.answers[f"{VT}/domains/first.com"] = failure
     server.answers[f"{VT}/domains/second.com"] = (200, vt_report(undetected=70))
