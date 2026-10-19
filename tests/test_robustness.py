@@ -1,30 +1,44 @@
 """Broken and damaged emails. Spam is often malformed, and the tool should still give a
-result or a clean error. The command line only catches ValueError (and OSError for the
-file), so anything else would end triage with a traceback."""
+report that nothing in the email can rewrite, or a clean error. The command line only catches
+ValueError (and OSError for the file), so anything else would end triage with a traceback."""
 
 import random
+import unicodedata
 from pathlib import Path
 
 import pytest
 
 from triage.checks import run_checks
-from triage.iocs import from_email
+from triage.iocs import from_email, from_text
 from triage.models import MAX_FROMS
 from triage.parser import parse_bytes
 from triage.received import find_origin, received_warnings
+from triage.report import build_report, build_text_report, render_json, render_markdown, render_summary, render_text
 
 FIXTURES = Path(__file__).parent / "fixtures"
 HEADERS = b"From: a@example.org\r\nTo: b@example.net\r\nSubject: s\r\n"
 
 
 def triage(raw: bytes) -> None:
+    # Up to the report in every format, which is where text from the email ends up. The bytes are
+    # read as alert text too, since alerts quote the email they came from.
+    reports = [build_text_report(from_text(raw.decode("utf-8-sig", errors="replace")), {})]
     try:
         parsed = parse_bytes(raw)
     except ValueError:
-        return  # shown as a clean error
-    run_checks(parsed)
-    from_email(parsed, find_origin(parsed))
-    received_warnings(parsed)
+        pass  # shown as a clean error
+    else:
+        origin = find_origin(parsed)
+        reports.append(build_report(parsed, origin, run_checks(parsed), from_email(parsed, origin), {},
+                                    parsed.parse_warnings + received_warnings(parsed)))
+    for report in reports:
+        # Anything outside ASCII, control characters included, is written as an escape code
+        assert render_json(report).isascii()
+        for text in (render_text(report), render_markdown(report), render_summary(report, ["note.md"])):
+            # Shown as codes, so nothing from the email can move the cursor, reorder the text or
+            # start a line of its own
+            unescaped = [c for c in text if c != "\n" and unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp")]
+            assert not unescaped, f"shown as they are: {unescaped}"
 
 
 BROKEN_EMAILS = {
@@ -45,6 +59,11 @@ BROKEN_EMAILS = {
     "broken Authentication-Results": HEADERS + (
         b"Authentication-Results: ;;;=;(;)=pass;dmarc=\r\nAuthentication-Results: (((\r\n\r\nx"),
     "null bytes and stray 8-bit": b"From: a\x00@exa\xffmple.org\r\nSubject: \x00\xff\r\n\r\n\x00",
+    # Where the parser keeps a terminal code, a right-to-left override and a line separator
+    "characters that would change the report": (
+        b"From: =?utf-8?q?Pay=1B[2KPal=E2=80=A8PASS?= <a@example.org>\r\nSubject: s\r\n"
+        b'Content-Type: multipart/mixed; boundary="B"\r\n\r\n--B\r\nContent-Type: application/pdf\r\n'
+        b'Content-Disposition: attachment; filename="invoice\xe2\x80\xaefdp.exe\xe2\x80\xa8x"\r\n\r\nx\r\n--B--'),
 }
 
 
@@ -60,7 +79,9 @@ TOKENS = [b"\r\n", b"\r\n\r\n", b"=?utf-8?b?", b"=?utf-8?q?", b"?=", b"<", b">",
           b"[", b"]", b"--", b"boundary=", b'Content-Type: multipart/mixed; boundary="b"',
           b"Content-Transfer-Encoding: base64", b'charset="x-unknown"', b'<a href="', b'">', b"</a>",
           b"<![", b"\x00", b"\xff", b"%", b"xn--", b"\x1b", b"Received: from ", b" by ",
-          b"Authentication-Results: ", b";", b"=", b":", b"::ffff:", b"[IPv6:"]
+          b"Authentication-Results: ", b";", b"=", b":", b"::ffff:", b"[IPv6:",
+          # A right-to-left override, a zero-width space and a line separator, in UTF-8
+          b"\xe2\x80\xae", b"\xe2\x80\x8b", b"\xe2\x80\xa8"]
 
 
 def damaged(data: bytes, rng: random.Random) -> bytes:
