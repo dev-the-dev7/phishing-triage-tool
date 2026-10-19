@@ -142,7 +142,7 @@ includes the company's root certificate.
 - **The JSON keeps values exactly as found**, since a tool that blocks or searches needs
   the real URL, with each indicator's defanged form next to it. It's plain ASCII: anything
   else, control characters included, is written as an escape code, so no viewer can be
-  fooled by it. A `format` number says when a field is renamed or removed.
+  fooled by it. A `format` number says when a field is renamed, removed, or changes type.
 
 - **Files are written whole or not at all.** Each goes to a file next to it first and is
   then swapped in, with `\n` line endings on any system. If one can't be written, the full
@@ -160,7 +160,10 @@ includes the company's root certificate.
   it on top. Anything below was already in the message when it arrived, so the sender
   could have written it, including a fake `dmarc=pass`. If your provider might not add
   one, list its server name in `TRUSTED_AUTHSERV_IDS` (`mx.google.com` for Gmail) and only
-  headers from it count, as RFC 8601 recommends.
+  headers from it count, as RFC 8601 recommends. Return-Path can't be read that way. Most
+  providers remove one that came with the message and add their own, but not all put
+  theirs on top: Microsoft 365's is below the From. So with more than one, the Return-Path
+  check is inconclusive and names them, as the report does.
 
 - **When SPF or DMARC reports more than one result, the worst one counts.** Each gives one
   result per message, so extra results mean someone added text to the header. An attacker

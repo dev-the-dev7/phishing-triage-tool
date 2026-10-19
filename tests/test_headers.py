@@ -368,6 +368,21 @@ def test_return_path(return_path, expected):
         assert check.evidence == "Bounces go to evil.com, From is paypal.com"
 
 
+@pytest.mark.parametrize("return_paths, found", [
+    # A planted one matching the From, above the provider's own as Microsoft 365 orders them,
+    # would otherwise pass
+    (("<bounce@paypal.com>", "<x@evil.com>"), "2 Return-Path headers, with bounce@paypal.com; x@evil.com"),
+    # An empty first one would otherwise read as no Return-Path at all
+    (("<>", "<bounce@paypal.com>"), "2 Return-Path headers, with bounce@paypal.com"),
+    (("<>", "<>"), "2 Return-Path headers"),
+])
+def test_more_than_one_return_path_is_inconclusive(return_paths, found):
+    check = check_return_path(parse(*(f"Return-Path: {rp}" for rp in return_paths), "From: service@paypal.com"))
+    assert check.result == INCONCLUSIVE
+    assert check.evidence == (f"The email has {found}. Your provider adds one, but not always first, so which is "
+                              "its own can't be told")
+
+
 def test_return_path_with_a_from_subdomain_passes():
     check = check_return_path(parse("Return-Path: <bounce@paypal.com>", "From: service@mail.paypal.com"))
     assert check.result == PASS

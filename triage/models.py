@@ -115,7 +115,8 @@ class ParsedEmail:
     sender: list[Address] = field(default_factory=list)  # Outlook shows it as "Sender on behalf of From"
     reply_to: list[Address] = field(default_factory=list)
     reply_to_headers: int = 0
-    return_path: Address | None = None
+    return_path: list[Address] = field(default_factory=list)  # from every Return-Path header, in order
+    return_path_headers: int = 0
     to: list[Address] = field(default_factory=list)
     subject: str = ""
     date: str = ""

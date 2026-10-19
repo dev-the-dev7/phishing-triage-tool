@@ -63,9 +63,9 @@ def _parse_message(raw: bytes) -> ParsedEmail:
         warnings.append(f"{name} is an email attached to this one. If this is a forwarded report, "
                         "the checks ran on the wrapper. Save the attachment and run the tool on it.")
 
-    # One is allowed, but like From and Reply-To, the email can have more
+    # One of each is allowed, but like From and Reply-To, the email can have more
     sender = _addresses(msg, "Sender", warnings, every_header=True)
-    return_path = _addresses(msg, "Return-Path", warnings)
+    return_path = _addresses(msg, "Return-Path", warnings, every_header=True)
     to = _addresses(msg, "To", warnings)
     # In From and Reply-To, encoded text is a check's evidence. No check reads what a client
     # shows for these, so it's a warning.
@@ -90,7 +90,8 @@ def _parse_message(raw: bytes) -> ParsedEmail:
         sender=sender,
         reply_to=_addresses(msg, "Reply-To", warnings, every_header=True),
         reply_to_headers=_count_headers(msg, "Reply-To"),
-        return_path=return_path[0] if return_path else None,
+        return_path=return_path,
+        return_path_headers=_count_headers(msg, "Return-Path"),
         to=to,
         subject=_text_header(msg, "Subject", warnings),
         date=_header(msg, "Date", warnings),

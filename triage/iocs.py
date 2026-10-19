@@ -50,10 +50,9 @@ def from_email(parsed: ParsedEmail, origin: Origin | None) -> Indicators:
     # listed, since phishing names the real brand to look genuine, and neither is a link's text.
     urls, hosts, emails = [], [], []
     # The email's own addresses first, so a long list of link domains can't push them down
-    for address in [*parsed.from_addrs, *parsed.sender, *parsed.reply_to, parsed.return_path]:
-        if address:
-            emails.append(address.email)
-            hosts.append(address.domain)
+    for address in [*parsed.from_addrs, *parsed.sender, *parsed.reply_to, *parsed.return_path]:
+        emails.append(address.email)
+        hosts.append(address.domain)
     if origin and origin.ip:
         hosts.append(origin.ip)
     for href in [link.href for link in parsed.links] + parsed.other_urls:

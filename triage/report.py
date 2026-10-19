@@ -30,8 +30,8 @@ FOLLOW_UPS = [
     "Block the attacker's own sender address and domains, not spoofed or shared ones like a webmail or "
     "link-shortening service",
 ]
-# Changed when a field is renamed or removed, so tools reading the JSON can tell
-JSON_FORMAT = 1
+# Changed when a field is renamed, removed, or changes type, so tools reading the JSON can tell
+JSON_FORMAT = 2
 
 
 @dataclass
@@ -40,7 +40,7 @@ class EmailFacts:
     sender: list[Address]
     to: list[Address]
     reply_to: list[Address]
-    return_path: Address | None
+    return_path: list[Address]
     subject: str
     date: str
     message_id: str
@@ -199,8 +199,8 @@ def _file_name(attachment: Attachment, shown) -> str:
 
 def _address_fields(email: EmailFacts) -> list[tuple[str, list[Address]]]:
     fields = [("From", email.from_addrs), ("Sender", email.sender), ("To", email.to), ("Reply-To", email.reply_to),
-              ("Return-Path", [email.return_path])]
-    return [(label, addresses) for label, addresses in fields if addresses and addresses[0]]
+              ("Return-Path", email.return_path)]
+    return [(label, addresses) for label, addresses in fields if addresses]
 
 
 def _address(address: Address) -> str:
@@ -356,7 +356,8 @@ def render_json(report: Report) -> str:
         "email": None if email is None else {
             "from": list(map(_json_address, email.from_addrs)), "sender": list(map(_json_address, email.sender)),
             "to": list(map(_json_address, email.to)),
-            "reply_to": list(map(_json_address, email.reply_to)), "return_path": _json_address(email.return_path),
+            "reply_to": list(map(_json_address, email.reply_to)),
+            "return_path": list(map(_json_address, email.return_path)),
             "subject": email.subject, "date": email.date, "message_id": email.message_id, "link_count": email.links,
             "attachments": [{"filename": a.filename, "content_type": a.content_type, "size": a.size,
                              "sha256": a.sha256} for a in email.attachments],
@@ -388,8 +389,8 @@ def render_json(report: Report) -> str:
     return json.dumps(data, indent=2) + "\n"
 
 
-def _json_address(address: Address | None) -> dict | None:
-    return None if address is None else {"name": address.display_name, "address": address.email}
+def _json_address(address: Address) -> dict:
+    return {"name": address.display_name, "address": address.email}
 
 
 def _shown(text: str, limit: int = MAX_VALUE_CHARS) -> str:

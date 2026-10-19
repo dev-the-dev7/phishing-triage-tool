@@ -237,16 +237,22 @@ def check_return_path(parsed: ParsedEmail) -> Check:
 def _check_return_path(parsed: ParsedEmail, from_addr: Address | None) -> Check:
     # Weak on its own: mailing services often use their own bounce domain
     name, strength = "Return-Path domain", Strength.WEAK
-    if not parsed.return_path or not from_addr:
+    if parsed.return_path_headers > 1:
+        found = join_first_five([address.email for address in parsed.return_path])
+        listed = f", with {found}" if found else ""
+        return Check(name, Result.INCONCLUSIVE, strength,
+                     f"The email has {parsed.return_path_headers} Return-Path headers{listed}. Your provider adds "
+                     "one, but not always first, so which is its own can't be told")
+    return_path = parsed.return_path[0] if parsed.return_path else None
+    if not return_path or not from_addr:
         return Check(name, Result.INCONCLUSIVE, strength, "Return-Path or From missing, nothing to compare")
-    if not parsed.return_path.domain or not from_addr.domain:
+    if not return_path.domain or not from_addr.domain:
         return Check(name, Result.INCONCLUSIVE, strength, "Return-Path or From has no domain, nothing to compare")
 
     from_base = base_domain(from_addr.domain)
-    rp_base = base_domain(parsed.return_path.domain)
+    rp_base = base_domain(return_path.domain)
     if rp_base != from_base:
-        return Check(name, Result.FLAG, strength,
-                     f"Bounces go to {parsed.return_path.domain}, From is {from_addr.domain}")
+        return Check(name, Result.FLAG, strength, f"Bounces go to {return_path.domain}, From is {from_addr.domain}")
     return Check(name, Result.PASS, strength, f"Return-Path matches the From domain ({from_base})")
 
 

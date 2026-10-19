@@ -1,5 +1,5 @@
 {
-  "format": 1,
+  "format": 2,
   "email": {
     "from": [
       {
@@ -20,10 +20,12 @@
         "address": "case-review@account-resolution.example"
       }
     ],
-    "return_path": {
-      "name": "",
-      "address": "bounce@paypa1.com"
-    },
+    "return_path": [
+      {
+        "name": "",
+        "address": "bounce@paypa1.com"
+      }
+    ],
     "subject": "Action required: your account has been limited",
     "date": "Mon, 05 Oct 2026 16:14:18 +0000",
     "message_id": "<20261005161418.4417@paypa1.com>",

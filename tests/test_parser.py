@@ -301,6 +301,12 @@ def test_every_sender_address_is_kept(sender_lines):
         Address("Lists", "list@example.net", "example.net"), Address("", "x@evil.com", "evil.com")]
 
 
+def test_return_path_headers_are_counted():
+    parsed = parse("From: a@example.org", "Return-Path: <bounce@paypal.com>", "Return-Path: <x@evil.com>")
+    assert parsed.return_path_headers == 2
+    assert [a.email for a in parsed.return_path] == ["bounce@paypal.com", "x@evil.com"]
+
+
 def test_missing_headers_are_empty():
     parsed = parse("From: a@example.org")
     assert (parsed.subject, parsed.date, parsed.message_id, parsed.sender) == ("", "", "", [])

@@ -194,6 +194,15 @@ def test_the_sender_header_is_shown():
     assert json.loads(render_json(report))["email"]["sender"] == [{"name": "Lists", "address": "list@example.net"}]
 
 
+def test_every_return_path_is_shown():
+    # One is the provider's, and it isn't always the first
+    report = report_of(return_path=[Address("", "bounce@paypal.com", "paypal.com"),
+                                    Address("", "x@evil.com", "evil.com")])
+    assert section(render_text(report), "Email")[1] == "  Return-Path: bounce@paypal.com; x@evil.com"
+    assert json.loads(render_json(report))["email"]["return_path"] == [
+        {"name": "", "address": "bounce@paypal.com"}, {"name": "", "address": "x@evil.com"}]
+
+
 def test_a_pattern_is_shown_when_one_matches():
     report = report_of([Check("DMARC", "pass", "strong", ""),
                         Check("Lookalike domain", "flag", "strong", "", domains=["paypa1.com"])],
@@ -257,7 +266,7 @@ def test_the_json_holds_the_same_report():
     text = render_json(report)
     assert text.isascii()
     data = json.loads(text)
-    assert data["format"] == 1
+    assert data["format"] == 2
     assert data["email"]["subject"] == "Hi\x1b\N{RIGHT-TO-LEFT OVERRIDE}"
     assert data["origin"] == {"ip": "8.8.8.8", "name": "x", "received_by": "mx.example.net", "earliest_claim": None,
                               "network": None}
