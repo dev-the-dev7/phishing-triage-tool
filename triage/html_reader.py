@@ -55,9 +55,11 @@ IMPLIED_ENDS = {
 OUTLOOK_MARKERS = re.compile(r"<!--\[if[^\]]{0,100}\]>(?:<!--\s{0,10}-->|<!-->)?"
                              r"|(?:<!--\s{0,10})?<!\[endif\]-->", re.I)
 
-# Marks where a tag sits in a link's text. Any already in the text are taken out first.
+# Marks where a tag sits in a link's text, and where a line starts or ends. Any already in the
+# text are taken out first.
 TAG_MARK = "\x00"
-LONE_SEPARATOR = re.compile(r"(?<=\x00)[^\w\x00]+(?=\x00)")
+LINE_MARK = "\x01"
+LONE_SEPARATOR = re.compile(r"(?<=[\x00\x01])[^\w\x00\x01]+(?=[\x00\x01])")
 # Not marked: <a> ends the link, and the unshown elements aren't on the page. <wbr> only marks
 # where a word can wrap, CSS can't make it show anything, and long URLs often have one at
 # each dot.
@@ -99,7 +101,7 @@ class _HTMLCollector(HTMLParser):
         self._close_implied(tag)
         gone, invisible, zero_font = _hiding(tag, attrs, self._context(moved=tag not in TABLE_CONTENT))
         if tag in BLOCK_ELEMENTS:
-            self._break(tag, gone)
+            self._break(gone)
         if tag in UNSHOWN_ELEMENTS:
             self._unshown = tag
         elif tag not in VOID_ELEMENTS:
@@ -148,7 +150,7 @@ class _HTMLCollector(HTMLParser):
         self.pieces.append((re.sub(r"\s+", " ", data), hidden))
         if self._href is not None:
             self._full_text.append(data)
-            self._marked.append(data.replace(TAG_MARK, ""))
+            self._marked.append(data.replace(TAG_MARK, "").replace(LINE_MARK, ""))
             if not hidden:
                 self._text.append(data)
 
@@ -174,13 +176,13 @@ class _HTMLCollector(HTMLParser):
             gone = self._open[index][1]
             self._close_from(index)
         if tag in BLOCK_ELEMENTS:
-            self._break(tag, gone)
+            self._break(gone)
 
     def close(self):
         super().close()
         self._finish()  # catches an <a> that was never closed
 
-    def _break(self, tag, gone):
+    def _break(self, gone):
         # A new line, and a space in a link's text, so example.com<br>Sign in isn't read as
         # example.comSign. A block that's gone takes no lines, so it only adds the space to the
         # reading with hidden parts.
@@ -188,11 +190,9 @@ class _HTMLCollector(HTMLParser):
             self.pieces.append(("\n", False))
         if self._href is not None:
             self._full_text.append(" ")
+            self._marked.append(LINE_MARK)
             if not gone:
                 self._text.append(" ")
-            if tag == "br":
-                # Read like a tag holding a space, since CSS can hide a <br> and join paypal<br>.com
-                self._marked.append(" " + TAG_MARK)
 
     def _finish(self):
         if self._href is not None:
@@ -337,13 +337,15 @@ def _collect(html: str, warnings) -> ParsedHTML:
 def _split_by_tags(marked: str) -> list[str]:
     # Domains split by a tag in a link's text, like pay<b>pal</b>.com, where CSS could hide or
     # add text. Tags holding only spaces or punctuation are also dropped, since hiding one is
-    # how a domain gets split. A domain inside one tag's text isn't counted.
+    # how a domain gets split. The text is read with its line breaks and without, since CSS can
+    # hide a <br> or put a block on the same line. A domain inside one tag's text isn't counted.
     if TAG_MARK not in marked:
         return []
-    whole = set(domains_in_text(marked.replace(TAG_MARK, " ")))
+    whole = set(domains_in_text(marked.replace(TAG_MARK, " ").replace(LINE_MARK, " ")))
     joined = marked.replace(TAG_MARK, "")
     without_separators = LONE_SEPARATOR.sub("", marked).replace(TAG_MARK, "")
-    found = domains_in_text(joined) + domains_in_text(without_separators)
+    found = [domain for text in (joined, without_separators) for line_break in (" ", "")
+             for domain in domains_in_text(text.replace(LINE_MARK, line_break))]
     return [domain for domain in dict.fromkeys(found) if domain not in whole]
 
 

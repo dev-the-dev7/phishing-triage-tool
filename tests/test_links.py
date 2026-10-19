@@ -459,6 +459,7 @@ def test_space_hidden_by_css_the_tool_doesnt_read(hidden):
     ("www.<b>paypal</b>.com", "www.paypal.com"),
     # Also read without a tag that holds only spaces or punctuation, since hiding that splits it
     ("paypal<span><i> </i></span>.com", "paypal.com"),
+    ("paypal<div> </div>.com", "paypal.com"),
 ])
 def test_tag_in_the_middle_of_a_domain(text, domain):
     assert html_email(f'<a href="https://x.com/">{text}</a>').links[0].split_domains == [domain]
@@ -521,6 +522,9 @@ def test_a_tag_in_a_domain_in_a_link_with_no_host(href):
     ('paypal<span class="h">.evil</span>.com', "paypal.evil.com"),
     # A <br> hidden by CSS joins the lines, like a hidden space
     ('<style>.h{display:none}</style>paypal<br class="h">.com', "paypal.com"),
+    # On a line of its own, so the next line's text doesn't join it
+    ('paypal<i> </i>.com<br>Sign in', "paypal.com"),
+    ('<div>paypal<i> </i>.com</div><div>Sign in</div>', "paypal.com"),
 ])
 def test_tag_in_the_middle_of_a_domain_makes_the_link_check_inconclusive(text, domain):
     # The tool can't tell what the reader sees there, so it doesn't pass
