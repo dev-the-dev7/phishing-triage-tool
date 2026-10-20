@@ -18,8 +18,8 @@ def sent_as(display_name: str, domain: str = "evil.com") -> ParsedEmail:
 
 
 def known_limitation(*values, reason: str):
-    # Written as what should happen, so it fails today. See Limitations in the README.
-    # Only a failed assert counts, so a test that crashes isn't hidden as a known limitation.
+    # Written as what should happen, so it fails today. Only a failed assert counts, so a test
+    # that crashes isn't hidden as a known limitation.
     return pytest.param(*values, marks=pytest.mark.xfail(reason=reason, raises=AssertionError))
 
 
@@ -426,7 +426,7 @@ def test_own_name_evidence_names_your_main_domain(monkeypatch):
 
 
 def test_own_names_wait_for_own_domains(monkeypatch):
-    # With no domains to compare against, a name isn't checked yet (see lists.py)
+    # A name isn't checked until there are domains to compare it against
     monkeypatch.setattr(impersonation, "OWN_NAMES", {"contoso"})
     assert check_display_name(sent_as("Contoso IT Support", "gmail.com")).result == Result.PASS
     assert check_lookalike(link_to("contoso-login.com")).result == Result.PASS

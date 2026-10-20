@@ -21,8 +21,8 @@ def seconds(task) -> float:
     return time.perf_counter() - start
 
 
-# Input that made the tool take minutes while it was being built, or that could. Each runs in
-# milliseconds now, so a one-second limit leaves plenty of room on a slow machine.
+# Input that made the tool take minutes while it was being built, or that could. The slowest
+# takes about half a second now, so a machine twice as slow would reach the one-second limit.
 
 def test_long_run_of_spaces_in_received():
     # \s+ next to .*? in the from ... by pattern tried every split of the spaces

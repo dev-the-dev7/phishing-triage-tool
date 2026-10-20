@@ -31,7 +31,6 @@ def copy(tmp_path, monkeypatch):
 
 
 def serve(monkeypatch, *chunks: bytes) -> mock.Mock:
-    # requests.get answering with the chunks
     response = mock.MagicMock()
     response.__enter__.return_value = response
     response.iter_content.return_value = list(chunks)

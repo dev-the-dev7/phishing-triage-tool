@@ -221,7 +221,8 @@ def test_email_indicators():
     )
     assert from_email(parsed, Origin("203.0.113.5", "mail.paypa1.com", "mx.example.net")) == Indicators(
         # Links are written the way the browser reads them
-        urls=["https://evil.com/a", "https://evil.com/@paypal.com", "http://www.evil.net/b", "http://216.58.214.4/p.gif"],
+        urls=["https://evil.com/a", "https://evil.com/@paypal.com", "http://www.evil.net/b",
+              "http://216.58.214.4/p.gif"],
         domains=["paypa1.com", "evil.net", "lists.example", "evil.org", "mailer.example", "relay.example", "evil.com",
                  "www.evil.net"],
         ips=["203.0.113.5", "216.58.214.4"],

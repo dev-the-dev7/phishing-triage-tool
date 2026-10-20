@@ -66,11 +66,13 @@ def _check_display_name(from_addr: Address | None) -> Check:
         name_found = any(_has_words(form, executive_form) for form in display_forms
                          for executive_form in _name_forms(executive))
         if name_found and base not in own_domains:
-            hits.append(f"uses executive {executive}'s name but the mail is from {domain}, outside your organization's domains")
+            hits.append(f"uses executive {executive}'s name but the mail is from {domain}, outside your "
+                        "organization's domains")
 
     if hits:
         return Check(name, Result.FLAG, strength, f'"{display}" ' + "; ".join(hits))
-    return Check(name, Result.PASS, strength, f'"{display}" doesn\'t show another address or claim a brand or executive it isn\'t from')
+    return Check(name, Result.PASS, strength,
+                 f'"{display}" doesn\'t show another address or claim a brand or executive it isn\'t from')
 
 
 def check_lookalike(parsed: ParsedEmail) -> Check:

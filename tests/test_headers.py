@@ -59,7 +59,8 @@ def test_trusted_authserv_ids_pick_the_provider_header(monkeypatch):
     # Compared without case. The trusted server's header counts even with a forged one above
     # it, which the default (trust the topmost) would have used.
     monkeypatch.setattr(headers, "TRUSTED_AUTHSERV_IDS", {"MX.Google.com"})
-    checks = authenticate(ALL_PASS.replace("mx.google.com", "mx.evil.com"), ALL_FAIL.replace("mx.google.com", "MX.GOOGLE.COM"))
+    checks = authenticate(ALL_PASS.replace("mx.google.com", "mx.evil.com"),
+                          ALL_FAIL.replace("mx.google.com", "MX.GOOGLE.COM"))
     assert [c.result for c in checks.values()] == [FLAG, FLAG, FLAG]
 
 
@@ -110,7 +111,7 @@ def test_method_and_result_names_ignore_case():
 def gmail_header(mailfrom: str) -> str:
     # The provider copies the sender's envelope address into its header, in a comment and
     # in smtp.mailfrom, the way Gmail does
-    return (f"mx.google.com; dkim=fail header.i=@paypal.com header.s=s1 header.b=AbCd; "
+    return ("mx.google.com; dkim=fail header.i=@paypal.com header.s=s1 header.b=AbCd; "
             f"spf=pass (google.com: domain of {mailfrom} designates 203.0.113.5 as permitted "
             f"sender) smtp.mailfrom={mailfrom}; dmarc=fail header.from=paypal.com")
 

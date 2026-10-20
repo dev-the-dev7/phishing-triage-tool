@@ -314,7 +314,8 @@ def _collect(html: str, warnings) -> ParsedHTML:
         # HTMLParser no longer raises on broken markup, but a bug here still could. What was
         # found before it is kept.
         collector._finish()
-        warnings.append(f"HTML body couldn't be fully parsed ({type(e).__name__}), links after that point may be missing")
+        warnings.append(f"HTML body couldn't be fully parsed ({type(e).__name__}), links after that point may "
+                        "be missing")
 
     # <base href="https://evil.com/"> sends <a href="/login"> to evil.com (baseStriker).
     # Browsers use the first <base>, but skip one in <template> or <svg>, which Python's parser

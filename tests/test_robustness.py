@@ -45,7 +45,8 @@ BROKEN_EMAILS = {
     "attachment with bad base64": HEADERS + (
         b"Content-Type: multipart/mixed; boundary=X\r\n\r\n--X\r\nContent-Type: application/pdf\r\n"
         b"Content-Transfer-Encoding: base64\r\nContent-Disposition: attachment; filename=a.pdf\r\n\r\n!!!@@@\r\n--X--"),
-    "HTML in an unknown charset": HEADERS + b"Content-Type: text/html; charset=x-nope\r\n\r\n<a href='http://\xff\xfe.com'>p</a>",
+    "HTML in an unknown charset": HEADERS + (
+        b"Content-Type: text/html; charset=x-nope\r\n\r\n<a href='http://\xff\xfe.com'>p</a>"),
     "20,000 unclosed links": HEADERS + b"Content-Type: text/html\r\n\r\n" + b"<a href='http://x.com'>" * 20_000,
     "broken hrefs": HEADERS + b"Content-Type: text/html\r\n\r\n" + b"".join(
         b"<a href='%s'>paypal.com</a>" % href for href in (

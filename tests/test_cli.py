@@ -481,7 +481,8 @@ def test_alert_text_without_indicators(capsys, tmp_path):
 
 def test_indicators_are_printed_escaped(capsys, tmp_path):
     # A right-to-left override in a URL could make it read differently on screen
-    _, out, _ = run(capsys, "--text", write_text(tmp_path, "https://evil.com/\N{RIGHT-TO-LEFT OVERRIDE}fdp.exe".encode()))
+    _, out, _ = run(capsys, "--text",
+                    write_text(tmp_path, "https://evil.com/\N{RIGHT-TO-LEFT OVERRIDE}fdp.exe".encode()))
     assert "  URL      hxxps://evil[.]com/\\u202efdp[.]exe" in out
 
 

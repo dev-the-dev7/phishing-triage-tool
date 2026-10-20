@@ -109,7 +109,7 @@ def test_entities_are_read_like_a_browser(html):
     assert check_link_mismatch(html_email(html)).result == Result.FLAG
 
 
-# Finding links. HTML is only read as text, never rendered.
+# Finding links
 
 def test_every_html_part_is_read():
     # Clients show the last alternative they can, and some show every inline part
@@ -291,7 +291,8 @@ def test_a_wrapped_url_in_plain_text_matches_where_it_goes():
 def test_a_wrapper_naming_two_links_is_a_link_to_each():
     parsed = html_email('<a href="https://www.google.com/url?q=https://www.paypal.com/&amp;url=https://paypa1.com/">'
                         'www.paypal.com</a>')
-    assert links_in(parsed) == [("https://paypa1.com/", "www.paypal.com"), ("https://www.paypal.com/", "www.paypal.com")]
+    assert links_in(parsed) == [("https://paypa1.com/", "www.paypal.com"),
+                                ("https://www.paypal.com/", "www.paypal.com")]
     assert check_link_mismatch(parsed).evidence == "text shows www.paypal.com but goes to paypa1.com"
     assert check_lookalike(parsed).result == Result.FLAG
     assert from_email(parsed, None).urls == ["https://paypa1.com/", "https://www.paypal.com/"]
@@ -314,7 +315,8 @@ def test_many_wrappers_naming_two_links_give_one_warning():
 
 
 def test_a_google_redirect_shown_in_text_flags():
-    parsed = parse_bytes((HEADERS + "\r\nSign in at https://www.google.com/url?q=https://evil.com/login today").encode())
+    body = "Sign in at https://www.google.com/url?q=https://evil.com/login today"
+    parsed = parse_bytes((HEADERS + "\r\n" + body).encode())
     assert check_link_mismatch(parsed).evidence == "text shows www.google.com but goes to evil.com"
 
 
@@ -527,7 +529,7 @@ def test_a_tag_in_a_domain_in_a_link_with_no_host(href):
 
 
 @pytest.mark.parametrize("text, domain", [
-    # The two in test_space_hidden_by_css_the_tool_doesnt_read, which the link check can't flag
+    # A space hidden by CSS the tool doesn't read, which it can't flag but doesn't pass either
     ('<style>.h{display:none}</style>paypal<span class="h"> </span>.com', "paypal.com"),
     ('paypal<span style="display:none;display:x"> </span>.com', "paypal.com"),
     # Hidden by CSS, .evil makes the text match where the link goes

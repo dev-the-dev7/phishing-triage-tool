@@ -168,7 +168,8 @@ CREATED_LAST_WEEK = 1_799_539_200
 def test_a_domains_registration_date_is_shown(server, keys):
     server.answers[f"{VT}/domains/evil.com"] = (200, vt_report(undetected=60, created=CREATED_LAST_WEEK))
     assert texts(look_up(Indicators(domains=["evil.com"]))) == {
-        "evil.com": ["VirusTotal: 0 of 60 engines flagged it malicious, last checked 2026-10-12, registered 2027-01-10"]}
+        "evil.com": ["VirusTotal: 0 of 60 engines flagged it malicious, last checked 2026-10-12, "
+                     "registered 2027-01-10"]}
 
 
 def test_a_files_creation_date_isnt_a_registration(server, keys):
@@ -575,8 +576,9 @@ def test_other_failures_only_affect_that_lookup(server, keys, failure, reason):
     server.answers[f"{VT}/domains/first.com"] = failure
     server.answers[f"{VT}/domains/second.com"] = (200, vt_report(undetected=70))
     results = look_up(Indicators(domains=["first.com", "second.com"]))
-    assert texts(results) == {"first.com": [f"VirusTotal: unavailable, {reason}"],
-                              "second.com": ["VirusTotal: 0 of 70 engines flagged it malicious, last checked 2026-10-12"]}
+    assert texts(results) == {
+        "first.com": [f"VirusTotal: unavailable, {reason}"],
+        "second.com": ["VirusTotal: 0 of 70 engines flagged it malicious, last checked 2026-10-12"]}
 
 
 def test_an_answer_too_big_to_be_a_report(server, keys, monkeypatch):
@@ -723,8 +725,8 @@ def saved_entry(**entry) -> str:
     # Each as long as Python will print, so the engines they add up to are one digit too long
     saved_entry(facts={**dict.fromkeys(["malicious", "suspicious", "undetected", "harmless"], int("9" * 4300)),
                        "checked": ""}),
-], ids=["not JSON", "nested too deep", "a list", "older version", "lookups not an object", "time as text", "future time",
-        "time too big", "facts of the wrong type", "counts too long to print"])
+], ids=["not JSON", "nested too deep", "a list", "older version", "lookups not an object", "time as text",
+        "future time", "time too big", "facts of the wrong type", "counts too long to print"])
 def test_a_damaged_cache_is_looked_up_again(server, keys, contents):
     enrich.CACHE_FILE.parent.mkdir(parents=True)
     enrich.CACHE_FILE.write_text(contents, encoding="utf-8")

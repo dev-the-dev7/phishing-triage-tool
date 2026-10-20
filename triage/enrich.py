@@ -205,7 +205,7 @@ def check_microsoft_hops(origin: Origin | None, results: dict[str, list[Reputati
         # one is the real handoff only when every hop above it is Microsoft's
         if unknown_above:
             return Check(name, Result.FLAG, strength, f"{join_first_five(faked)}. The Origin line may be wrong",
-                         [f"Who owns these isn't known, so Microsoft may have got the email from one of them "
+                         ["Who owns these isn't known, so Microsoft may have got the email from one of them "
                           f"instead: {join_first_five(unknown_above)}"], ips=faked_ips)
         return Check(name, Result.FLAG, strength, f"{join_first_five(faked)}. The first is the server Microsoft "
                                                   "really got the email from, so the Origin line may be wrong",
@@ -215,7 +215,7 @@ def check_microsoft_hops(origin: Origin | None, results: dict[str, list[Reputati
     if hops:
         headers = "header" if len(hops) == 1 else "headers"
         numbers = join_first_five([str(position) for position, _, _ in hops], ", ")
-        return Check(name, Result.PASS, strength, f"Every hop named as a Microsoft server has a Microsoft IP, in "
+        return Check(name, Result.PASS, strength, "Every hop named as a Microsoft server has a Microsoft IP, in "
                                                   f"Received {headers} {numbers}")
     return Check(name, Result.PASS, strength, "No hop was taken as Microsoft's on its name alone")
 
@@ -543,7 +543,8 @@ def _read_cache() -> dict:
         saved = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError, RecursionError):
         return {}
-    if not isinstance(saved, dict) or saved.get("version") != CACHE_VERSION or not isinstance(saved.get("lookups"), dict):
+    if (not isinstance(saved, dict) or saved.get("version") != CACHE_VERSION
+            or not isinstance(saved.get("lookups"), dict)):
         return {}
     # Saved in the last CACHE_HOURS, and not in the future. Compared, not subtracted, since
     # subtracting a huge number from a time raises OverflowError.

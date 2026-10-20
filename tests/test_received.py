@@ -108,13 +108,15 @@ GOOGLE_RELAY = f"from mail-sor-f41.google.com (mail-sor-f41.google.com. [209.85.
 
 def test_relays_inside_the_provider_are_skipped():
     # The hop from a Google server to a Google server is internal, so the origin is the one below
-    found = origin(GOOGLE_RELAY, f"from mail.evil.net (mail.evil.net. [203.0.113.5]) by mail-sor-f41.google.com; {DATE}")
+    found = origin(GOOGLE_RELAY,
+                   f"from mail.evil.net (mail.evil.net. [203.0.113.5]) by mail-sor-f41.google.com; {DATE}")
     assert found == Origin("203.0.113.5", "mail.evil.net", "mail-sor-f41.google.com")
 
 
 def test_microsoft_relays_are_skipped_by_name():
     found = origin(
-        f"from SN6PR02.prod.outlook.com (2603:10b6:5:1d3::10) by SN6PR02MB.namprd02.prod.outlook.com with HTTPS; {DATE}",
+        "from SN6PR02.prod.outlook.com (2603:10b6:5:1d3::10) by SN6PR02MB.namprd02.prod.outlook.com "
+        f"with HTTPS; {DATE}",
         f"from mail.evil.net (203.0.113.5) by SN6PR02.mail.protection.outlook.com (10.1.2.3); {DATE}",
     )
     assert found == Origin("203.0.113.5", "mail.evil.net", "SN6PR02.mail.protection.outlook.com",
@@ -126,7 +128,8 @@ def test_hops_taken_as_microsofts_by_name_are_listed():
     # IPs or other providers' names, and hops below the handoff, aren't listed.
     found = origin(
         f"by SN6PR02MB.namprd02.prod.outlook.com with HTTPS; {DATE}",
-        f"from SN6PR02.prod.outlook.com (2603:10b6:5:1d3::10) by SN6PR02MB.namprd02.prod.outlook.com with HTTPS; {DATE}",
+        "from SN6PR02.prod.outlook.com (2603:10b6:5:1d3::10) by SN6PR02MB.namprd02.prod.outlook.com "
+        f"with HTTPS; {DATE}",
         f"from DM6PR02.prod.outlook.com (10.1.2.4) by SN6PR02.prod.outlook.com; {DATE}",
         GOOGLE_RELAY,
         f"from x.mail.protection.outlook.com (203.0.113.9) by mail-sor-f41.google.com; {DATE}",
@@ -185,7 +188,8 @@ def test_no_received_headers():
                           "and only --enrich checks its IP's owner",
                    raises=AssertionError)
 def test_sender_claiming_a_microsoft_name():
-    found = origin(f"from x.mail.protection.outlook.com (203.0.113.9) by SN6PR02.mail.protection.outlook.com (10.1.2.3); {DATE}",
+    found = origin("from x.mail.protection.outlook.com (203.0.113.9) by SN6PR02.mail.protection.outlook.com "
+                   f"(10.1.2.3); {DATE}",
                    f"from mail.evil.net (198.51.100.7) by x.mail.protection.outlook.com; {DATE}")
     assert found.ip == "203.0.113.9"
 
@@ -196,7 +200,8 @@ def parse_received(*received: str) -> ParsedEmail:
 
 
 def test_folded_received_header():
-    parsed = parse_received(f"from mail.evil.net (mail.evil.net. [203.0.113.5])\r\n\tby mx.google.com with ESMTPS id x;\r\n\t{DATE}")
+    parsed = parse_received("from mail.evil.net (mail.evil.net. [203.0.113.5])\r\n\tby mx.google.com with ESMTPS id x;"
+                            f"\r\n\t{DATE}")
     assert find_origin(parsed) == Origin("203.0.113.5", "mail.evil.net", "mx.google.com")
 
 
