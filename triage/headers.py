@@ -4,7 +4,7 @@ free webmail."""
 import re
 from dataclasses import replace
 
-from .domains import base_domain
+from .domains import base_domain, decode_idn, decoded_base
 from .models import Address, Check, ParsedEmail, Result, Strength, encoded_addresses, for_each_from, join_first_five
 from .settings import FREE_EMAIL_DOMAINS, TRUSTED_AUTHSERV_IDS
 
@@ -108,7 +108,7 @@ def _check_dkim(clauses: list[tuple[str, str]], signatures: list[str], from_addr
     values = [result for result, _ in clauses]
     from_domain = from_addr.domain if from_addr else ""
     from_base = base_domain(from_domain) if from_domain else ""
-    aligned = [result for result, domain in clauses if domain and base_domain(domain) == from_base]
+    aligned = [result for result, domain in clauses if domain and decoded_base(domain) == decoded_base(from_base)]
 
     if "pass" in aligned:
         result = Result.PASS
@@ -132,8 +132,8 @@ def _check_dmarc(clauses: list[tuple[str, str]], from_addr: Address | None, sour
     # the mail client shows the other.
     check = _check_single_result("DMARC", clauses, Strength.STRONG, source)
     from_domain = from_addr.domain if from_addr else ""
-    checked = {base_domain(domain) for _, domain in clauses if domain}
-    if check.result == Result.PASS and checked and checked != {base_domain(from_domain)}:
+    checked = {decoded_base(domain) for _, domain in clauses if domain}
+    if check.result == Result.PASS and checked and checked != {decoded_base(from_domain)}:
         return Check(check.name, Result.INCONCLUSIVE, check.strength,
                      f"{check.evidence}. The provider checked a different From than the one shown "
                      f"({from_domain or 'none'})")
@@ -150,7 +150,7 @@ def _signed_body_length(signatures: list[str], from_base: str) -> str | None:
         for part in signature.split(";"):
             tag, _, value = part.partition("=")
             tags.setdefault(tag.strip(), value.strip())
-        if "l" in tags and base_domain(tags.get("d", "")) == from_base:
+        if "l" in tags and decoded_base(tags.get("d", "")) == decoded_base(from_base):
             return tags["l"]
     return None
 
@@ -248,13 +248,13 @@ def _check_reply_to(parsed: ParsedEmail, from_addr: Address | None) -> Check:
                      caveats + noted)
 
     # On free webmail everyone shares the domain, so compare the whole address instead
-    if base_domain(from_addr.domain) in FREE_EMAIL_DOMAINS:
+    if _free_webmail(from_addr.domain):
         expected = from_addr.email.lower()
         mismatches = [a.email for a in parsed.reply_to if a.email.lower() != expected]
     else:
         expected = base_domain(from_addr.domain)
         # The whole address when there's no domain to show ("Reply-To: undisclosed")
-        mismatches = [a.domain or a.email for a in parsed.reply_to if base_domain(a.domain) != expected]
+        mismatches = [a.domain or a.email for a in parsed.reply_to if decoded_base(a.domain) != decoded_base(expected)]
 
     if mismatches:
         evidence = f"Replies go to {join_first_five(list(dict.fromkeys(mismatches)), ', ')}, not {expected}"
@@ -286,8 +286,7 @@ def _check_return_path(parsed: ParsedEmail, from_addr: Address | None) -> Check:
         return Check(name, Result.INCONCLUSIVE, strength, "Return-Path or From has no domain, nothing to compare")
 
     from_base = base_domain(from_addr.domain)
-    rp_base = base_domain(return_path.domain)
-    if rp_base != from_base:
+    if decoded_base(return_path.domain) != decoded_base(from_base):
         return Check(name, Result.FLAG, strength, f"Bounces go to {return_path.domain}, From is {from_addr.domain}")
     return Check(name, Result.PASS, strength, f"Return-Path matches the From domain ({from_base})")
 
@@ -303,6 +302,11 @@ def _check_free_email(from_addr: Address | None) -> Check:
     if not from_addr or not from_addr.domain:
         return Check(name, Result.INCONCLUSIVE, strength, "No readable From domain")
     base = base_domain(from_addr.domain)
-    if base in FREE_EMAIL_DOMAINS:
+    if _free_webmail(base):
         return Check(name, Result.FLAG, strength, f"Sent from a free {base} account, which anyone can create")
     return Check(name, Result.PASS, strength, f"{base} isn't on the free webmail list")
+
+
+def _free_webmail(domain: str) -> bool:
+    # Decoded like the email's domain, so the list can write a provider either way
+    return decoded_base(domain) in {decode_idn(d) for d in FREE_EMAIL_DOMAINS}

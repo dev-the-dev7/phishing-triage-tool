@@ -3,7 +3,7 @@ link open a web page at all, and was it put behind Google's redirect."""
 
 import re
 
-from .domains import TAB_OR_NEWLINE, TEXT_URL, base_domain, decode_idn, domains_in_text, url_host
+from .domains import TAB_OR_NEWLINE, TEXT_URL, decoded_base, domains_in_text, url_host
 from .html_reader import MAX_BASES
 from .link_wrappers import unwrap
 from .models import Check, ParsedEmail, Result, Strength, join_first_five
@@ -37,7 +37,7 @@ def check_link_mismatch(parsed: ParsedEmail) -> Check:
             shown_domain = _shown_domain(text)
             # Both decoded, so a Unicode domain and its xn-- form match. The lookalike check
             # covers that domain.
-            if shown_domain and base_domain(decode_idn(shown_domain)) != base_domain(decode_idn(href_host)):
+            if shown_domain and decoded_base(shown_domain) != decoded_base(href_host):
                 mismatches.append(f"text shows {shown_domain} but goes to {href_host}")
                 break
 

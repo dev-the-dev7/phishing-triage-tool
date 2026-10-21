@@ -4,7 +4,7 @@ import functools
 import re
 from pathlib import Path
 
-from .domains import (base_domain, decode_idn, is_ip, lookalike_forms, normalize_unicode,
+from .domains import (base_domain, decode_idn, decoded_base, is_ip, lookalike_forms, normalize_unicode,
                       registered_name, url_host)
 from .models import Address, Check, ParsedEmail, Result, Strength, for_each_from, join_first_five
 from .settings import ALLOWED_NAMES, BRANDS, EXECUTIVES, FREE_EMAIL_DOMAINS, JOIN_WORDS, OWN_DOMAINS, OWN_NAMES
@@ -38,14 +38,14 @@ def _check_display_name(from_addr: Address | None) -> Check:
     display = from_addr.display_name
     # The whole address when there's no domain to show (From: "PayPal" <support>)
     domain = from_addr.domain or from_addr.email
-    base = base_domain(from_addr.domain)
+    base = decoded_base(from_addr.domain)
     display_forms = lookalike_forms(display)
     hits = []
 
     # A display name like "security@paypal.com" hides the real address in many clients.
     # Normalized first, which also catches a fullwidth ＠.
     for addr_domain in re.findall(r"@([\w-]+(?:\.[\w-]+)+)", normalize_unicode(display)):
-        if base_domain(addr_domain) != base:
+        if decoded_base(addr_domain) != base:
             hits.append(f'shows an address at {addr_domain} but the mail is from {domain}')
 
     reported = []  # one hit per organization
@@ -60,7 +60,7 @@ def _check_display_name(from_addr: Address | None) -> Check:
             continue
         reported.append(target_domains)
 
-    own_domains = {base_domain(d) for d in OWN_DOMAINS}
+    own_domains = _own_domains()
     for executive in sorted(EXECUTIVES):
         # Each part as its own word: "Sarah Chen (CEO)" and "Chen, Sarah" both match.
         name_found = any(_has_words(form, executive_form) for form in display_forms
@@ -199,15 +199,21 @@ def _english_words() -> frozenset[str]:
 
 
 def _impersonation_targets() -> list[tuple[str, list[str]]]:
-    if not OWN_DOMAINS:
-        return list(BRANDS.items())
-    # Base domains, so mail.contoso.com still matches contoso.com. Repeats are dropped in
-    # order, so the main one stays first.
-    own_domains = list(dict.fromkeys(base_domain(d) for d in OWN_DOMAINS))
+    # Decoded like the email's domains, so settings.py can write xn--mller-kva.de or müller.de
+    brands = [(name, [decode_idn(d) for d in domains]) for name, domains in BRANDS.items()]
+    own_domains = _own_domains()
+    if not own_domains:
+        return brands
     # Owning contosocorp.com makes contosocorp.net a lookalike, even if your name is "contoso"
     names = sorted(n.lower() for n in OWN_NAMES) + [registered_name(d) for d in own_domains]
     # Every name gets the same domain list, so the checks treat them as one organization
-    return list(BRANDS.items()) + [(name, own_domains) for name in dict.fromkeys(names)]
+    return brands + [(name, own_domains) for name in dict.fromkeys(names)]
+
+
+def _own_domains() -> list[str]:
+    # Base domains, so mail.contoso.com still matches contoso.com. Repeats are dropped in
+    # order, so the main one stays first.
+    return list(dict.fromkeys(decoded_base(d) for d in OWN_DOMAINS))
 
 
 def _main_domain(target: str, target_domains: list[str]) -> str:
@@ -231,13 +237,14 @@ def _unlisted_domains(parsed: ParsedEmail) -> list[tuple[str, str, str]]:
             found_in.setdefault(link_host, set()).add("link")
 
     owned_domains = {d for _, domains in _impersonation_targets() for d in domains}
+    free_webmail = {decode_idn(d) for d in FREE_EMAIL_DOMAINS}
     unlisted = []
     for domain in sorted(found_in):
         # The domain as the reader sees it: xn--pypal-4ve.com shows as pаypal.com
         display_domain = decode_idn(domain)
         base = base_domain(display_domain)
         # Free webmail domains are real providers, not lookalikes, and have their own check
-        if base in owned_domains or base in FREE_EMAIL_DOMAINS:
+        if base in owned_domains or base in free_webmail:
             continue
         label = domain if display_domain == domain else f"{domain} (displays as {display_domain})"
         label += f" [{', '.join(sorted(found_in[domain]))}]"

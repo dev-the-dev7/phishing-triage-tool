@@ -456,3 +456,40 @@ def test_return_path_with_a_from_without_a_domain_is_inconclusive():
 ])
 def test_free_email(from_addr, expected):
     assert check_free_email(parse(f"From: {from_addr}")).result == expected
+
+
+# Mail systems that handle international addresses can write a domain with non-English
+# letters, while others in the same email write it as DNS does
+MULLER = "m\N{LATIN SMALL LETTER U WITH DIAERESIS}ller.de"
+BOTH_FORMS = [MULLER, "xn--mller-kva.de"]
+
+
+@pytest.mark.parametrize("from_domain, other", [BOTH_FORMS, BOTH_FORMS[::-1]])
+def test_a_domain_written_both_ways_is_one_domain(from_domain, other):
+    parsed = parse(f"Authentication-Results: mx.example.net; dkim=pass header.d={other}; dmarc=pass "
+                   f"header.from={other}", f"Return-Path: <bounce@{other}>", f"From: billing@{from_domain}",
+                   f"Reply-To: help@{other}")
+    checks = [check_dkim(parsed), check_dmarc(parsed), check_reply_to(parsed), check_return_path(parsed)]
+    assert [check.result for check in checks] == [PASS] * 4
+    signed = authenticate(f"mx.example.net; dkim=pass header.d={other}", from_addr=f"billing@{from_domain}",
+                          signatures=[f"v=1; d={other}; s=s1; l=50; b=x"])["DKIM"]
+    assert "covers only the first 50 bytes of the body" in signed.evidence
+
+
+@pytest.mark.parametrize("listed", BOTH_FORMS)
+@pytest.mark.parametrize("sent_from", BOTH_FORMS)
+def test_free_webmail_listed_either_way(monkeypatch, listed, sent_from):
+    monkeypatch.setattr(headers, "FREE_EMAIL_DOMAINS", {listed})
+    assert check_free_email(parse(f"From: alice@{sent_from}")).result == FLAG
+    # Webmail Reply-Tos are compared by the whole address, since everyone shares the domain
+    assert check_reply_to(parse(f"From: alice@{sent_from}", f"Reply-To: bob@{sent_from}")).result == FLAG
+
+
+def test_evidence_shows_a_domain_the_way_the_email_wrote_it():
+    # Only the comparisons decode. Decoded, this From would read as paypal.com spelled with a
+    # Cyrillic a.
+    parsed = parse("Authentication-Results: mx.example.net; dkim=pass header.d=xn--pypal-4ve.com",
+                   "DKIM-Signature: v=1; d=xn--pypal-4ve.com; s=s1; l=50; b=x", "Return-Path: <x@xn--pypal-4ve.com>",
+                   "From: service@xn--pypal-4ve.com", "Reply-To: x@evil.com")
+    for check in (check_dkim(parsed), check_reply_to(parsed), check_return_path(parsed), check_free_email(parsed)):
+        assert "xn--pypal-4ve.com" in check.evidence and "p\N{CYRILLIC SMALL LETTER A}ypal" not in check.evidence

@@ -420,6 +420,42 @@ def test_own_domain_listed_as_a_subdomain(monkeypatch):
     assert check_display_name(sent_as("Ian Wright", "contoso.com")).result == Result.PASS
 
 
+# Mail can write a domain with non-English letters either way, and so can settings.py
+MULLER = "m\N{LATIN SMALL LETTER U WITH DIAERESIS}ller.de"
+BOTH_FORMS = [MULLER, "xn--mller-kva.de"]
+
+
+@pytest.mark.parametrize("listed", BOTH_FORMS)
+@pytest.mark.parametrize("sent_from", BOTH_FORMS)
+def test_own_domain_in_either_form(monkeypatch, listed, sent_from):
+    monkeypatch.setattr(impersonation, "OWN_DOMAINS", [listed])
+    monkeypatch.setattr(impersonation, "EXECUTIVES", {"Ian Wright"})
+    assert check_display_name(sent_as("Ian Wright", sent_from)).result == Result.PASS
+    assert check_lookalike(link_to(sent_from)).result == Result.PASS
+    assert check_lookalike(link_to("m\N{LATIN SMALL LETTER U WITH DIAERESIS}ller-login.de")).result == Result.FLAG
+
+
+@pytest.mark.parametrize("listed", BOTH_FORMS)
+@pytest.mark.parametrize("sent_from", BOTH_FORMS)
+def test_brand_domain_in_either_form(monkeypatch, listed, sent_from):
+    monkeypatch.setattr(impersonation, "BRANDS", {"m\N{LATIN SMALL LETTER U WITH DIAERESIS}ller": [listed]})
+    assert check_display_name(sent_as("M\N{LATIN SMALL LETTER U WITH DIAERESIS}ller", sent_from)).result == Result.PASS
+    assert check_lookalike(link_to(sent_from)).result == Result.PASS
+
+
+@pytest.mark.parametrize("shown, sent_from", [BOTH_FORMS, BOTH_FORMS[::-1]])
+def test_display_name_showing_the_same_address_in_the_other_form_passes(shown, sent_from):
+    assert check_display_name(sent_as(f"billing@{shown}", sent_from)).result == Result.PASS
+
+
+@pytest.mark.parametrize("listed", BOTH_FORMS)
+def test_free_webmail_listed_either_way_isnt_a_lookalike(monkeypatch, listed):
+    # A provider named like a brand is the webmail check's to report
+    monkeypatch.setattr(impersonation, "FREE_EMAIL_DOMAINS", {listed})
+    monkeypatch.setattr(impersonation, "BRANDS", {"m\N{LATIN SMALL LETTER U WITH DIAERESIS}ller": ["mueller.com"]})
+    assert check_lookalike(link_to(MULLER)).result == Result.PASS
+
+
 def test_own_name_evidence_names_your_main_domain(monkeypatch):
     # Names are compared without case, and the first domain in OWN_DOMAINS is the main one
     monkeypatch.setattr(impersonation, "OWN_NAMES", {"Northwind"})

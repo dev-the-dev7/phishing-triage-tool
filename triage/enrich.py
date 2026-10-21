@@ -67,8 +67,9 @@ FACTS = {
                   "domain": str},
 }
 
-# Domains whose reputation is already known, so they're looked up last
-KNOWN_DOMAINS = {domain for domains in (*BRANDS.values(), FREE_EMAIL_DOMAINS) for domain in domains}
+# Domains whose reputation is already known, so they're looked up last. Written as DNS writes
+# them, like the indicators.
+KNOWN_DOMAINS = {ascii_domain(domain) for domains in (*BRANDS.values(), FREE_EMAIL_DOMAINS) for domain in domains}
 
 PICTURE_ENDINGS = (".png", ".jpg", ".jpeg", ".gif", ".bmp")
 
@@ -317,7 +318,9 @@ def _not_sent_because(kind: str, value: str) -> str:
     # .arpa names are DNS's own, like reverse lookups, and never a website
     elif not _ends_in_tld(host) or host.rpartition(".")[2] == "arpa":
         return "not a public domain name"
-    elif base_domain(host) in {base_domain(domain) for domain in OWN_DOMAINS}:
+    # Both as DNS writes them, so a domain with non-English letters can be written either way
+    # in OWN_DOMAINS
+    elif base_domain(ascii_domain(host)) in {base_domain(ascii_domain(domain)) for domain in OWN_DOMAINS}:
         return "one of your own domains"
     # Phishing links often carry the reader's address. It has to end in a real TLD, so
     # logo@2x.png doesn't count.

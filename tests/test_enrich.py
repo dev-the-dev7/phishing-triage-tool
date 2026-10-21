@@ -371,6 +371,17 @@ def test_your_own_domains_arent_sent(server, keys, monkeypatch):
     assert server.requests == []
 
 
+@pytest.mark.parametrize("listed", ["m\N{LATIN SMALL LETTER U WITH DIAERESIS}ller.de", "xn--mller-kva.de"])
+def test_your_own_domains_arent_sent_in_either_form(server, keys, monkeypatch, listed):
+    # Indicators are written as DNS writes them, except a URL whose port doesn't read, which
+    # keeps the letters
+    monkeypatch.setattr(enrich, "OWN_DOMAINS", [listed])
+    values = ["https://m\N{LATIN SMALL LETTER U WITH DIAERESIS}ller.de:99999/x", "mail.xn--mller-kva.de"]
+    found = Indicators(urls=values[:1], domains=values[1:])
+    assert texts(look_up(found)) == {value: ["VirusTotal: skipped, one of your own domains"] for value in values}
+    assert server.requests == []
+
+
 def test_without_keys_nothing_is_sent(server):
     results = look_up(Indicators(urls=["https://evil.com/"], domains=["evil.com"], ips=["8.8.8.8"], hashes=[SHA]))
     assert texts(results) == {

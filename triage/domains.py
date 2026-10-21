@@ -223,6 +223,12 @@ def decode_idn(domain: str) -> str:
     return ".".join(labels)
 
 
+def decoded_base(domain: str) -> str:
+    # For comparing, since the same domain can be written either way: mail.xn--mller-kva.de
+    # and müller.de both give müller.de. Evidence keeps the form the email used.
+    return decode_idn(base_domain(domain))
+
+
 # Characters that pass for Latin letters: digit swaps, and the lowercase Cyrillic and Greek
 # letters Unicode's confusables list maps to one. Escapes, since they look identical on screen.
 LOOKALIKE_CHARS = str.maketrans({
