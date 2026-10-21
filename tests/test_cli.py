@@ -3,6 +3,7 @@ emails written to a temporary folder."""
 
 import contextlib
 import errno
+import importlib
 import io
 import json
 import os
@@ -16,6 +17,7 @@ from unittest.mock import MagicMock
 import pytest
 import requests
 
+import triage
 import triage.__main__ as cli
 from triage import enrich, impersonation
 from triage.__main__ import main
@@ -202,6 +204,13 @@ def test_exit_code_from_python_m_triage(name, code):
     # The command the README gives, run for real. Scripts read the exit code to tell
     # finished triage from an error.
     assert run_module(FIXTURES / name).returncode == code
+
+
+def test_python_older_than_3_14_is_refused(monkeypatch):
+    # On 3.11.0 an address header can't be read, and a check passes without it
+    monkeypatch.setattr(sys, "version_info", (3, 13, 9, "final", 0))
+    with pytest.raises(SystemExit, match=r"^error: the tool needs Python 3\.14 or newer, not 3\.13$"):
+        importlib.reload(triage)
 
 
 def test_output_in_an_encoding_without_emoji(tmp_path):
