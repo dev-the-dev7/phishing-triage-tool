@@ -36,14 +36,16 @@ The analyst makes the call.
 
 ## Installing
 
-The tool needs Python 3.14 or newer, and is tested with 3.14 on Windows and Linux. On an
-older version it stops with an error, since its results can't be trusted there: on
-3.11.0, address headers can't be read, and the Reply-To check passes without one.
+The tool needs Python 3.14 or newer, and is tested with 3.14 on Windows and Linux
+and with 3.15 on Windows. On an older version it stops with an error instead of running,
+since an older Python can read an email differently, and a check can then pass when it
+shouldn't.
 
 It runs from this folder with `python -m triage`, without being installed as a package.
 To set it up in PowerShell:
 
 ```powershell
+# 3.14, or a newer version you have, like py -3.15
 py -3.14 -m venv .venv
 # If PowerShell won't run scripts, allow them for this window only:
 # Set-ExecutionPolicy -Scope Process RemoteSigned
@@ -51,8 +53,8 @@ py -3.14 -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-On Linux, create the environment with `python3.14 -m venv .venv` and activate it with
-`source .venv/bin/activate`.
+On Linux, create the environment with `python3.14 -m venv .venv`, or the newer version you
+have, and activate it with `source .venv/bin/activate`.
 
 `requirements.txt` holds what the tool needs: `requests` for the lookups, `idna` for
 writing domains as browsers do, and what `requests` installs, each pinned to one version

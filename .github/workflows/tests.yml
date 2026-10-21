@@ -1,4 +1,5 @@
-# Runs every test on Linux and Windows for each push to main and each pull request
+# Runs every test on Linux and Windows with Python 3.14 and the newest release, for each
+# push to main and each pull request
 name: Tests
 
 on:
@@ -13,10 +14,13 @@ permissions:
 jobs:
   test:
     strategy:
-      # One system failing doesn't cancel the other, so both results are seen
+      # One run failing doesn't cancel the others, so every result is seen
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        # The oldest version the tool accepts, and the newest release, so a new one is tested
+        # on the first push after it comes out
+        python: ["3.14", "3.x"]
     runs-on: ${{ matrix.os }}
     # A regression that makes a test run for minutes stops here, not after GitHub's six hours
     timeout-minutes: 20
@@ -31,8 +35,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
-          # The version the tool is built and tested with
-          python-version: "3.14"
+          python-version: ${{ matrix.python }}
+          # Otherwise 3.x is the newest version already on the runner, which can trail a release
+          check-latest: true
       - run: python -m pip install -r requirements-dev.txt
       # The timing tests run on their own, since measuring coverage slows the code down
       - run: python -m coverage run -m pytest --ignore=tests/test_timing.py
