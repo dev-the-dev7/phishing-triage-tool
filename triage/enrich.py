@@ -9,7 +9,7 @@ import os
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 from urllib.parse import quote, unquote
@@ -17,9 +17,8 @@ from urllib.parse import quote, unquote
 import requests
 
 from .domains import TLDS, ascii_domain, base_domain, decode_idn, hosting_service, is_ip, url_host
-from .iocs import EMAIL
-from .models import Attachment, Check, Indicators, LookupStatus, Origin, Reputation, Result, Strength, join_first_five
-from .received import MICROSOFT_SERVER_DOMAINS
+from .models import Attachment, Indicators, LookupStatus, Origin, Reputation, count
+from .reading.iocs import EMAIL
 from .settings import (ABUSEIPDB_LOOKUPS_PER_RUN, BRANDS, FREE_EMAIL_DOMAINS, OWN_DOMAINS, VT_LOOKUPS_PER_MINUTE,
                        VT_LOOKUPS_PER_RUN)
 
@@ -35,12 +34,6 @@ ABUSEIPDB_CHECK = "https://api.abuseipdb.com/api/v2/check"
 LIMIT_MINUTE = 61
 # Only reports from the last 90 days count, since an IP abused long ago may have a new owner
 ABUSEIPDB_DAYS = 90
-# A domain registered this recently is flagged, a common cut-off for newly registered
-# domains in mail and web filters
-NEW_DOMAIN_DAYS = 30
-# The owners AbuseIPDB can list Microsoft's IPs under. It names whoever holds the IP block,
-# and an attacker can't get a block listed under one of these.
-MICROSOFT_IP_OWNERS = {"microsoft.com"} | MICROSOFT_SERVER_DOMAINS
 
 # Seconds to wait for a server to connect, or to send more, before giving up
 TIMEOUT = 20
@@ -141,93 +134,6 @@ def look_up(found: Indicators, attachments: list[Attachment] | None = None, flag
     return results
 
 
-def check_domain_age(found: Indicators, results: dict[str, list[Reputation]]) -> Check:
-    # Most phishing domains are used within days of being registered, and an old one makes a
-    # lookalike likelier to be a real business. The brands' domains, webmail, your own, and
-    # names that aren't sent aren't in question.
-    name, strength = "Newly registered domain", Strength.MEDIUM
-    today = datetime.fromtimestamp(time.time(), timezone.utc).date()
-    new, old, unknown = [], [], []
-    for domain in found.domains:
-        if _not_sent_because("domain", domain) or _well_known(("domain", domain)):
-            continue
-        service = hosting_service(domain)
-        registered = _registered(domain, results)
-        if service:
-            unknown.append(f"{domain} (only {service} has one)")
-        elif registered is None or registered > today:
-            unknown.append(domain)
-        elif registered == today:
-            new.append(f"{domain} was registered {registered}, today")
-        elif (today - registered).days < NEW_DOMAIN_DAYS:
-            new.append(f"{domain} was registered {registered}, {_count((today - registered).days, 'day')} ago")
-        else:
-            old.append(f"{domain} {registered}")
-    if new:
-        return Check(name, Result.FLAG, strength, join_first_five(new))
-    if unknown:
-        return Check(name, Result.INCONCLUSIVE, strength, f"No registration date for {join_first_five(unknown)}")
-    if old:
-        return Check(name, Result.PASS, strength, f"Every domain was registered at least {NEW_DOMAIN_DAYS} days ago: "
-                                                  f"{join_first_five(old)}")
-    return Check(name, Result.PASS, strength, "No sender or link domain besides well-known ones and your own")
-
-
-def check_microsoft_hops(origin: Origin | None, results: dict[str, list[Reputation]]) -> Check:
-    # A sender can name itself as a Microsoft server and be skipped as one, but Microsoft's
-    # server wrote down its IP, and the IP's owner can't be faked
-    name, strength = "Faked Microsoft hop", Strength.VERY_STRONG
-    hops = origin.microsoft_hops if origin else []
-    faked, faked_ips, unknown, unknown_above = [], [], [], []
-    for position, server, ip in hops:
-        result = next((r for r in results.get(ip, []) if r.service == "AbuseIPDB"), None)
-        owner = result.facts.get("domain") if result else None
-        if owner in MICROSOFT_IP_OWNERS:
-            continue
-        if owner:
-            if not faked:
-                unknown_above = list(unknown)
-            faked.append(f"Received header {position} calls itself {server}, but AbuseIPDB lists {ip} under "
-                         f"{owner}: {result.text}")
-            faked_ips.append(ip)
-        elif result is None:
-            unknown.append(f"Received header {position} ({ip}): not looked up")
-        elif result.status == LookupStatus.FOUND:
-            unknown.append(f"Received header {position} ({ip}): AbuseIPDB doesn't list an owner")
-        else:
-            unknown.append(f"Received header {position} ({ip}): {result.text}")
-    if faked:
-        # Each header was written by the server the header above it came from, so the first faked
-        # one is the real handoff only when every hop above it is Microsoft's
-        if unknown_above:
-            return Check(name, Result.FLAG, strength, f"{join_first_five(faked)}. The Origin line may be wrong",
-                         ["Who owns these isn't known, so Microsoft may have got the email from one of them "
-                          f"instead: {join_first_five(unknown_above)}"], ips=faked_ips)
-        return Check(name, Result.FLAG, strength, f"{join_first_five(faked)}. The first is the server Microsoft "
-                                                  "really got the email from, so the Origin line may be wrong",
-                     ips=faked_ips)
-    if unknown:
-        return Check(name, Result.INCONCLUSIVE, strength, f"Who owns these isn't known: {join_first_five(unknown)}")
-    if hops:
-        headers = "header" if len(hops) == 1 else "headers"
-        numbers = join_first_five([str(position) for position, _, _ in hops], ", ")
-        return Check(name, Result.PASS, strength, "Every hop named as a Microsoft server has a Microsoft IP, in "
-                                                  f"Received {headers} {numbers}")
-    return Check(name, Result.PASS, strength, "No hop was taken as Microsoft's on its name alone")
-
-
-def _registered(domain: str, results: dict[str, list[Reputation]]) -> date | None:
-    # From the domain's VirusTotal result. A cached one could have been edited, so a date that
-    # doesn't read counts as none.
-    for result in results.get(domain, []):
-        if result.service == "VirusTotal" and result.facts.get("registered"):
-            try:
-                return date.fromisoformat(result.facts["registered"])
-            except ValueError:
-                return None
-    return None
-
-
 def _abuseipdb_order(found: Indicators, origin: Origin | None) -> list[str]:
     # Hops go top down, so fake ones added below can't push the sender's real one past the limit
     first = [origin.ip] if origin and origin.ip else []
@@ -254,7 +160,7 @@ def _virustotal_order(found: Indicators, attachments: list[Attachment], flagged:
                + [("ip", ip) for ip in found.ips])
     # Brand domains, free webmail and links to them last. sorted() is stable, so the rest
     # keep their order.
-    return sorted(lookups, key=_well_known)
+    return sorted(lookups, key=well_known)
 
 
 def _is_picture(attachment: Attachment) -> bool:
@@ -264,14 +170,14 @@ def _is_picture(attachment: Attachment) -> bool:
             and attachment.filename.lower().endswith(PICTURE_ENDINGS))
 
 
-def _well_known(lookup: tuple[str, str]) -> bool:
+def well_known(lookup: tuple[str, str]) -> bool:
     kind, value = lookup
     host = url_host(value) if kind == "url" else value
     return kind in ("domain", "url") and base_domain(host or "") in KNOWN_DOMAINS
 
 
 def _look_up_one(service: _Service, kind: str, value: str, cache: dict) -> Reputation:
-    reason = _not_sent_because(kind, value)
+    reason = not_sent_because(kind, value)
     if reason:
         return Reputation(service.name, LookupStatus.SKIPPED, f"skipped, {reason}")
     cache_key = _cache_key(service.name, kind, value)
@@ -298,7 +204,7 @@ def _look_up_one(service: _Service, kind: str, value: str, cache: dict) -> Reput
     return _found(service.name, facts)
 
 
-def _not_sent_because(kind: str, value: str) -> str:
+def not_sent_because(kind: str, value: str) -> str:
     # Why an indicator isn't sent, or "" when it can be. Private IPs, internal names and your
     # own domains would only tell the service about your network.
     if kind == "file":
@@ -426,7 +332,7 @@ def _wait_for_turn(service: _Service) -> None:
     if service.per_minute and len(service.sent) >= service.per_minute:
         wait = service.sent[-service.per_minute] + LIMIT_MINUTE - time.monotonic()
         if wait > 0:
-            print(f"Waiting {_count(math.ceil(wait), 'second')} for {service.name}'s limit of "
+            print(f"Waiting {count(math.ceil(wait), 'second')} for {service.name}'s limit of "
                   f"{service.per_minute} lookups a minute (Ctrl+C skips the rest of the lookups)", file=sys.stderr)
             time.sleep(wait)
 
@@ -508,7 +414,7 @@ def _describe_abuseipdb(facts: dict) -> str:
     if not facts["reports"]:
         text = f"no reports in the last {ABUSEIPDB_DAYS} days"
     else:
-        text = (f"reported {_count(facts['reports'], 'time')} by {_count(facts['users'], 'user')} in the last "
+        text = (f"reported {count(facts['reports'], 'time')} by {count(facts['users'], 'user')} in the last "
                 f"{ABUSEIPDB_DAYS} days, abuse confidence {facts['confidence']}%")
     # Its trusted list is why Google's DNS server has hundreds of reports and 0% confidence
     if facts["trusted"]:
@@ -520,10 +426,6 @@ def _describe_abuseipdb(facts: dict) -> str:
 def network(facts: dict) -> str:
     # Context, not a check: where the IP is, by AbuseIPDB's records, not where the sender is
     return (facts["isp"] + (f" in {facts['country']}" if facts["country"] else "")).strip()
-
-
-def _count(number: int, word: str) -> str:
-    return f"{number:,} {word}" if number == 1 else f"{number:,} {word}s"
 
 
 def _cache_key(service: str, kind: str, value: str) -> str:

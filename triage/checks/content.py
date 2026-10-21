@@ -6,7 +6,7 @@ would read like reassurance the check can't give."""
 
 import re
 
-from .models import Check, ParsedEmail, Result, Strength, join_first_five
+from ..models import Check, ParsedEmail, Result, Strength, join_first_five
 
 
 def check_hidden_text(parsed: ParsedEmail) -> list[Check]:

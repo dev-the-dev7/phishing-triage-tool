@@ -1,11 +1,11 @@
-"""Tests for triage/received.py: reading Received headers and finding the server that handed
-the email to your provider."""
+"""Tests for triage/reading/origin.py: reading Received headers and finding the server that
+handed the email to your provider."""
 
 import pytest
 
 from triage.models import Origin, ParsedEmail
-from triage.parser import parse_bytes
-from triage.received import _read_hop, find_origin, received_warnings
+from triage.reading.origin import _read_hop, find_origin, received_warnings
+from triage.reading.parser import parse_bytes
 
 DATE = "Tue, 6 Oct 2026 10:00:00 +0000"
 

@@ -4,9 +4,9 @@ import ipaddress
 import re
 from urllib.parse import unquote, urlsplit, urlunsplit
 
-from .domains import TEXT_URL, ascii_domain, browser_url, domains_in_text, is_ip, url_host, urls_in_text
 from .link_wrappers import destinations
-from .models import Indicators, Origin, ParsedEmail
+from ..domains import TEXT_URL, ascii_domain, browser_url, domains_in_text, is_ip, url_host, urls_in_text
+from ..models import Indicators, Origin, ParsedEmail
 
 EMAIL = re.compile(r"(?<![\w.+%-])[\w.+%-]+@[\w-]+(?:\.[\w-]+)+")
 IPV4 = re.compile(r"(?<![0-9.])[0-9]{1,3}(?:\.[0-9]{1,3}){3}(?!\.?[0-9])")

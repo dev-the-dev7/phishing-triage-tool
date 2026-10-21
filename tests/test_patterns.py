@@ -1,10 +1,10 @@
-"""Tests for triage/patterns.py: findings that mean more together than apart."""
+"""Tests for triage/report/patterns.py: findings that mean more together than apart."""
 
 from triage.checks import run_checks
-from triage.impersonation import check_lookalike
+from triage.checks.impersonation import check_lookalike
 from triage.models import Address, Check, Link, ParsedEmail
-from triage.parser import parse_bytes
-from triage.patterns import find_patterns
+from triage.reading.parser import parse_bytes
+from triage.report.patterns import find_patterns
 
 ORG = [Address("", "a@example.org", "example.org")]
 LOOKALIKE_FROM = [Address("", "a@paypa1.com", "paypa1.com")]

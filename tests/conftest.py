@@ -5,7 +5,8 @@ import socket
 
 import pytest
 
-from triage import enrich, headers, impersonation
+from triage import enrich
+from triage.checks import headers, impersonation, lookups
 
 
 @pytest.fixture(autouse=True)
@@ -37,8 +38,8 @@ def settings_as_shipped(monkeypatch):
 
 
 class FakeTime:
-    # Stands in for the time module in enrich.py. Time stands still unless a test moves it or
-    # the code waits, and a wait is counted instead of taken.
+    # Stands in for the time module in enrich.py and lookups.py. Time stands still unless a
+    # test moves it or the code waits, and a wait is counted instead of taken.
     def __init__(self):
         self.now = 1_800_000_000.0
         self.slept = []
@@ -58,6 +59,7 @@ class FakeTime:
 def clock(monkeypatch):
     fake = FakeTime()
     monkeypatch.setattr(enrich, "time", fake)
+    monkeypatch.setattr(lookups, "time", fake)
     return fake
 
 

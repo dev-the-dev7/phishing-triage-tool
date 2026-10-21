@@ -3,9 +3,9 @@ hidden inside words, an email that's only an image, and text added by CSS."""
 
 import pytest
 
-from triage.content import check_css_added_text, check_hidden_text, check_image_only
+from triage.checks.content import check_css_added_text, check_hidden_text, check_image_only
 from triage.models import Attachment, ParsedEmail, Result, Strength
-from triage.parser import parse_bytes
+from triage.reading.parser import parse_bytes
 
 HEADERS = "From: a@example.org\r\nTo: someone@example.net\r\nSubject: s\r\n"
 

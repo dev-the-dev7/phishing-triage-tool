@@ -1,11 +1,11 @@
-"""Tests for triage/link_wrappers.py: reading the real link out of Safe Links, Proofpoint, and
-Google's redirect."""
+"""Tests for triage/reading/link_wrappers.py: reading the real link out of Safe Links,
+Proofpoint, and Google's redirect."""
 
 from urllib.parse import quote
 
 import pytest
 
-from triage.link_wrappers import MAX_WRAPPERS, destinations, through_google, unwrap
+from triage.reading.link_wrappers import MAX_WRAPPERS, destinations, through_google, unwrap
 
 # The recipient's address is in data=, the way Safe Links writes it
 SAFE_LINK = ("https://nam02.safelinks.protection.outlook.com/?url=https%3A%2F%2Fevil.com%2Flogin%3Fid%3D1"

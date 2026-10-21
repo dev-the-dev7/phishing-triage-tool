@@ -3,8 +3,8 @@
 import ipaddress
 import re
 
-from .domains import base_domain, has_ip, is_internal_ip
-from .models import Origin, ParsedEmail, join_first_five
+from ..domains import base_domain, has_ip, is_internal_ip
+from ..models import Origin, ParsedEmail, join_first_five
 
 MICROSOFT_SERVER_DOMAINS = {"outlook.com", "office365.com", "exchangelabs.com"}
 

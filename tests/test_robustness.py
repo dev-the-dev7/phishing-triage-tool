@@ -9,10 +9,10 @@ from pathlib import Path
 import pytest
 
 from triage.checks import run_checks
-from triage.iocs import from_email, from_text
-from triage.models import MAX_FROMS
-from triage.parser import parse_bytes
-from triage.received import find_origin, received_warnings
+from triage.checks.headers import MAX_FROMS
+from triage.reading.iocs import from_email, from_text
+from triage.reading.origin import find_origin, received_warnings
+from triage.reading.parser import parse_bytes
 from triage.report import build_report, build_text_report, render_json, render_markdown, render_summary, render_text
 
 FIXTURES = Path(__file__).parent / "fixtures"

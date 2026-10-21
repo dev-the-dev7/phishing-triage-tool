@@ -1,13 +1,7 @@
-"""Dataclasses passed between the pipeline stages, how a check's evidence is written, and running
-a check on every From address."""
+"""Dataclasses passed between the pipeline stages, and how a check's evidence is written."""
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-
-# A check that compares the From runs once for each From address. Real mail has one, and on
-# thousands the Reply-To check alone would take minutes.
-MAX_FROMS = 10
 
 
 @dataclass
@@ -75,6 +69,10 @@ def join_first_five(items: list[str], separator: str = "; ") -> str:
     return separator.join(items[:5]) + extra
 
 
+def count(number: int, word: str) -> str:
+    return f"{number:,} {word}" if number == 1 else f"{number:,} {word}s"
+
+
 def encoded_addresses(addresses: list[Address], header: str = "") -> str:
     # One sentence for any number of them, so a thousand can't bury the report
     if len(addresses) == 1:
@@ -85,25 +83,6 @@ def encoded_addresses(addresses: list[Address], header: str = "") -> str:
     shown = join_first_five([f"{address.decoded} for {address.email}" for address in addresses])
     return (f"{named} have encoded text in them, which isn't allowed in an address. Some mail clients decode "
             f"them and show {shown}")
-
-
-def for_each_from(from_addrs: list[Address], check: Callable[[Address | None], Check]) -> Check:
-    # Mail clients don't agree on which From they show, so the check runs on each, or on None
-    # when there's no From address to read. Any flag counts, and a pass needs them all.
-    runs = [check(from_addr) for from_addr in from_addrs[:MAX_FROMS] or [None]]
-    unchecked = max(len(from_addrs) - MAX_FROMS, 0)
-    if len(runs) == 1 and not unchecked:
-        return runs[0]
-    result = next(r for r in (Result.FLAG, Result.INCONCLUSIVE, Result.PASS) if any(c.result == r for c in runs))
-    matching = [run for run in runs if run.result == result]
-    evidence = join_first_five(list(dict.fromkeys(run.evidence for run in matching)))
-    if result == Result.PASS and unchecked:
-        result = Result.INCONCLUSIVE
-        evidence += f". Only the first {len(runs)} of {len(from_addrs):,} From addresses were checked"
-    return Check(matching[0].name, result, matching[0].strength, evidence,
-                 list(dict.fromkeys(caveat for run in runs for caveat in run.caveats)),
-                 list(dict.fromkeys(domain for run in matching for domain in run.domains)),
-                 list(dict.fromkeys(ip for run in matching for ip in run.ips)))
 
 
 @dataclass

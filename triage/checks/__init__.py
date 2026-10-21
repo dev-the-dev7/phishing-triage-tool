@@ -1,11 +1,11 @@
-"""Runs every check that needs only the email. The two that need the lookups are in enrich.py."""
+"""Runs every check that needs only the email. The two that need the lookups are in lookups.py."""
 
 from .content import check_css_added_text, check_hidden_text, check_image_only
 from .headers import (check_ambiguous_from, check_dkim, check_dmarc, check_free_email, check_reply_to,
                       check_return_path, check_spf)
 from .impersonation import check_brand_joined, check_display_name, check_lookalike
 from .links import check_google_redirect, check_link_mismatch, check_link_type
-from .models import Check, ParsedEmail
+from ..models import Check, ParsedEmail
 
 
 def run_checks(parsed: ParsedEmail) -> list[Check]:

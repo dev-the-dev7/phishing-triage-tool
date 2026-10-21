@@ -9,12 +9,13 @@ from datetime import date
 from pathlib import Path
 
 from .checks import run_checks
+from .checks.lookups import check_domain_age, check_microsoft_hops
 from .domains import SUFFIX_LIST_DATE
-from .enrich import check_domain_age, check_microsoft_hops, look_up
-from .iocs import from_email, from_text
+from .enrich import look_up
 from .models import Indicators, Result
-from .parser import parse_file
-from .received import find_origin, received_warnings
+from .reading.iocs import from_email, from_text
+from .reading.origin import find_origin, received_warnings
+from .reading.parser import parse_file
 from .report import Report, build_report, build_text_report, render_json, render_markdown, render_summary, render_text
 
 # Alert text is short. This stops a log file passed by mistake from filling memory.

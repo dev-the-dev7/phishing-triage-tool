@@ -7,12 +7,12 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 
-from .domains import base_domain
-from .enrich import network
-from .iocs import defang, defang_text
-from .models import (Address, Attachment, Check, Indicators, LookupStatus, Origin, ParsedEmail, Reputation, Result,
-                     Strength, join_first_five)
 from .patterns import Pattern, find_patterns
+from ..domains import base_domain
+from ..enrich import network
+from ..models import (Address, Attachment, Check, Indicators, LookupStatus, Origin, ParsedEmail, Reputation, Result,
+                      Strength, join_first_five)
+from ..reading.iocs import defang, defang_text
 
 # Text from an email can be any length (a Subject can be 260 KB), so what's shown is cut
 MAX_VALUE_CHARS = 300

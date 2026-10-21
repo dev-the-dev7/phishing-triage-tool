@@ -170,28 +170,42 @@ that starts passing fails the run, until its mark and its README line are remove
 ## How the code is laid out
 
 `python -m triage` runs `triage/__main__.py`, which passes the email through each stage in
-turn: `parser.py` reads it, `received.py` finds its origin, `checks.py` runs the checks,
-`iocs.py` lists the indicators, `enrich.py` looks them up with `--enrich`, and `report.py`
-builds the report, which `__main__.py` prints or saves. Alert text from `--text` goes
-straight to the indicators.
+turn: `reading/` reads it, `checks/` judges it, `enrich.py` looks up its indicators with
+`--enrich`, and `report/` builds the report, which `__main__.py` prints or saves. Alert
+text from `--text` goes straight to the indicators.
 
-- `parser.py` reads a .eml file into a `ParsedEmail`: headers, addresses, bodies, links,
-  and attachment hashes. `html_reader.py` reads an HTML body the way a mail client shows
-  it, and `link_wrappers.py` reads the real link out of a rewritten one.
-- `checks.py` runs every check that needs only the email. They're in `headers.py` (SPF,
-  DKIM, DMARC, Ambiguous From, Reply-To, Return-Path, free webmail), `impersonation.py`
-  (posing as a brand, your organization, or an executive), `links.py` (where links go and
-  what they open), and `content.py` (hidden text, image-only emails, text added by CSS).
-- `enrich.py` looks the indicators up in VirusTotal and AbuseIPDB, with a cache and the
-  limits from `settings.py`, and holds the two checks that need the results: domain age
-  and faked Microsoft hops.
-- `report.py` builds one report and renders it for the terminal, as Markdown, and as JSON,
-  so the three can't disagree. `patterns.py` finds the patterns it shows.
-- `models.py` holds the dataclasses passed between the stages, and `domains.py` the
-  helpers for domains, hosts, and IPs, with the Public Suffix List in
-  `public_suffix_list.dat`. `update_suffixes.py` downloads a newer copy.
-- `settings.py` is what's yours to change, and `english_words.txt` is the word list short
-  brand names are checked against.
+```text
+triage/
+  __init__.py             stops on a Python older than 3.14
+  __main__.py             the command, which runs the stages in order
+  reading/                reads the email, judging nothing
+    parser.py             reads a .eml file into a ParsedEmail: headers, addresses,
+                          bodies, links, and attachment hashes
+    html_reader.py        reads an HTML body the way a mail client shows it
+    link_wrappers.py      reads the real link out of a rewritten one
+    origin.py             finds which outside server handed the email to your provider
+    iocs.py               lists the indicators, from the email or from --text alert text
+  checks/                 judges the email: each check gives flag, pass, or inconclusive
+    __init__.py           runs the ones that need only the email
+    headers.py            SPF, DKIM, DMARC, Ambiguous From, Reply-To, Return-Path,
+                          free webmail
+    impersonation.py      posing as a brand, your organization, or an executive
+    links.py              where links go and what they open
+    content.py            hidden text, image-only emails, text added by CSS
+    lookups.py            the two that need --enrich: domain age and faked Microsoft hops
+    english_words.txt     the word list short brand names are checked against
+  enrich.py               looks the indicators up in VirusTotal and AbuseIPDB, with a
+                          cache and the limits from settings.py
+  report/                 shows what was found
+    __init__.py           builds one report and renders it for the terminal, as
+                          Markdown, and as JSON, so the three can't disagree
+    patterns.py           finds patterns in the findings, without changing any result
+  models.py               the data passed between the stages, and how evidence is written
+  domains.py              helpers for domains, hosts, and IPs
+  public_suffix_list.dat  the Public Suffix List that domains.py reads
+  update_suffixes.py      downloads a newer copy of it
+  settings.py             what's yours to change
+```
 
 The tests in `tests/` mostly have one file per module, plus `test_cli.py` for the command
 line, `test_robustness.py` for damaged emails, and `test_timing.py` for input crafted to
@@ -379,9 +393,9 @@ be slow. The emails in `tests/fixtures/` are made up.
   six letters is one letter from ordinary words (apple: apply) and sits inside others
   (pineapple), so spelling alone can't tell a lookalike from a word. The tool asks ENABLE,
   an English word list its authors released into the public domain, which ships with the
-  tool (`triage/english_words.txt`, `enable1.txt` from github.com/dolph/dictionary) so it
-  works offline. A typo that isn't a word (`appie.com`, `metq.com`) is flagged. One that
-  is a word is inconclusive, since it can be harmless (`apply.com`) or a typosquat
+  tool (`triage/checks/english_words.txt`, `enable1.txt` from github.com/dolph/dictionary)
+  so it works offline. A typo that isn't a word (`appie.com`, `metq.com`) is flagged. One
+  that is a word is inconclusive, since it can be harmless (`apply.com`) or a typosquat
   (`appel.com`). A short name joined to a word phishers use (`appleid.com`, `mymeta.com`,
   from `JOIN_WORDS` in `settings.py`) is flagged, inside an English word (`pineapple.com`)
   it passes, and inside anything else (`applebyfarms.com`) it's inconclusive.

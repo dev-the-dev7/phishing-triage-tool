@@ -5,7 +5,7 @@ import re
 import string
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from .domains import browser_url, url_host
+from ..domains import browser_url, url_host
 
 # A link can be wrapped more than once, by the sender's service and then the reader's. Real
 # ones are two or three deep, and the limit keeps a link wrapped thousands of times quick.

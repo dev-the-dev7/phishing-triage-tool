@@ -5,12 +5,12 @@ from urllib.parse import quote
 
 import pytest
 
-from triage import html_reader
-from triage.impersonation import check_lookalike
-from triage.iocs import from_email
-from triage.links import check_google_redirect, check_link_mismatch, check_link_type
+from triage.checks.impersonation import check_lookalike
+from triage.checks.links import check_google_redirect, check_link_mismatch, check_link_type
 from triage.models import Check, Link, ParsedEmail, Result
-from triage.parser import parse_bytes
+from triage.reading import html_reader
+from triage.reading.iocs import from_email
+from triage.reading.parser import parse_bytes
 
 HEADERS = "From: a@example.org\r\nTo: someone@example.net\r\nSubject: s\r\n"
 
@@ -669,7 +669,7 @@ def test_links_are_read_against_every_base(decoy):
 def test_base_limit(monkeypatch):
     # Past the limit some places a link goes weren't read, so the check can't pass
     monkeypatch.setattr(html_reader, "MAX_BASES", 2)
-    monkeypatch.setattr("triage.links.MAX_BASES", 2)
+    monkeypatch.setattr("triage.checks.links.MAX_BASES", 2)
     bases = '<base href="https://one.com/"><base href="https://two.com/">'
     at_limit = html_email(bases + '<a href="/login">Sign in</a>')
     assert [href for href, _ in links_in(at_limit)] == ["https://one.com/login", "https://two.com/login"]
@@ -687,7 +687,7 @@ def test_base_limit(monkeypatch):
 
 def test_bases_no_link_uses_dont_count(monkeypatch):
     monkeypatch.setattr(html_reader, "MAX_BASES", 2)
-    monkeypatch.setattr("triage.links.MAX_BASES", 2)
+    monkeypatch.setattr("triage.checks.links.MAX_BASES", 2)
     bases = '<base href="https://one.com/"><base href="https://two.com/"><base href="https://evil.com/">'
     check = check_link_mismatch(html_email(bases + '<a href="https://example.org/">example.org</a>'))
     assert (check.result, check.caveats) == (Result.PASS, [])

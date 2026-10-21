@@ -1,4 +1,4 @@
-"""Tests for triage/report.py: how the evidence is sorted, summed up and written out."""
+"""Tests for triage/report/__init__.py: how the evidence is sorted, summed up and written out."""
 
 import json
 

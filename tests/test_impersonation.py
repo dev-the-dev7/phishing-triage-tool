@@ -1,10 +1,11 @@
-"""Tests for triage/impersonation.py: lookalike domains, brands joined to words, and display names."""
+"""Tests for triage/checks/impersonation.py: lookalike domains, brands joined to words, and
+display names."""
 
 import pytest
 
-from triage import impersonation
-from triage.impersonation import (LONG_NAME_LENGTH, MIN_NAME_LENGTH, _english_words, _one_typo_apart,
-                                  check_brand_joined, check_display_name, check_lookalike)
+from triage.checks import impersonation
+from triage.checks.impersonation import (LONG_NAME_LENGTH, MIN_NAME_LENGTH, _english_words, _one_typo_apart,
+                                         check_brand_joined, check_display_name, check_lookalike)
 from triage.models import Address, Link, ParsedEmail, Result
 from triage.settings import BRANDS
 

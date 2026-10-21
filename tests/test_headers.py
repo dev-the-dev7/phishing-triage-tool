@@ -1,14 +1,14 @@
-"""Tests for triage/headers.py: SPF, DKIM, DMARC, an ambiguous From, Reply-To, Return-Path, and free
-webmail."""
+"""Tests for triage/checks/headers.py: SPF, DKIM, DMARC, an ambiguous From, Reply-To,
+Return-Path, and free webmail."""
 
 import pytest
 
-from triage import headers
-from triage.headers import (check_ambiguous_from, check_dkim, check_dmarc, check_free_email, check_reply_to,
-                            check_return_path, check_spf)
-from triage.impersonation import check_lookalike
+from triage.checks import headers, run_checks
+from triage.checks.headers import (check_ambiguous_from, check_dkim, check_dmarc, check_free_email, check_reply_to,
+                                   check_return_path, check_spf)
+from triage.checks.impersonation import check_lookalike
 from triage.models import Check, ParsedEmail, Result
-from triage.parser import parse_bytes
+from triage.reading.parser import parse_bytes
 
 PASS, FLAG, INCONCLUSIVE = Result.PASS, Result.FLAG, Result.INCONCLUSIVE
 
@@ -381,6 +381,66 @@ def test_ambiguous_from(from_lines, evidence):
 
 def test_one_plain_from_isnt_listed():
     assert check_ambiguous_from(parse("From: PayPal <service@paypal.com>")) == []
+
+
+def checks_of(*header_lines: str) -> dict[str, Check]:
+    return {check.name: check for check in run_checks(parse(*header_lines))}
+
+
+def test_a_dmarc_pass_for_one_from_doesnt_cover_another():
+    # The attacker passes DMARC with their own domain, and some mail clients show the other From
+    found = checks_of("Authentication-Results: mx.example.net; dmarc=pass header.from=evil.com",
+                      "From: x@evil.com", "From: service@paypal.com")
+    assert (found["DMARC"].result, found["DMARC"].evidence) == (INCONCLUSIVE, (
+        "dmarc=pass for evil.com (from mx.example.net). The provider checked a different From than the one "
+        "shown (paypal.com)"))
+
+
+@pytest.mark.parametrize("header_lines, name, evidence", [
+    (("From: a@example.org", "From: x@gmail.com"), "Free webmail sender",
+     "Sent from a free gmail.com account, which anyone can create"),
+    (("From: a@evil.com, b@paypal.com", "Reply-To: x@evil.com"), "Reply-To", "Replies go to evil.com, not paypal.com"),
+    (("From: a@evil.com", 'From: "PayPal" <x@evil.net>'), "Display name",
+     '"PayPal" mentions "paypal" but the mail is from evil.net'),
+])
+def test_a_flag_on_any_from_counts(header_lines, name, evidence):
+    found = checks_of(*header_lines)[name]
+    assert (found.result, found.evidence) == (FLAG, evidence)
+
+
+def test_a_pass_needs_every_from():
+    found = checks_of("From: a@example.org, undisclosed", "Return-Path: <bounce@example.org>")
+    assert found["Return-Path domain"].result == INCONCLUSIVE
+    # Said once when every From gives the same reason
+    found = checks_of("From: a@example.org", "From: b@mail.example.org")
+    assert (found["Free webmail sender"].result, found["Free webmail sender"].evidence) == (
+        PASS, "example.org isn't on the free webmail list")
+
+
+def test_caveats_are_said_once():
+    found = checks_of("From: a@example.org", "From: b@example.org", "Reply-To: a@example.org",
+                      "Reply-To: b@example.org")
+    assert len(found["Reply-To"].caveats) == 1
+
+
+def test_past_the_limit_a_check_cant_pass(monkeypatch):
+    monkeypatch.setattr(headers, "MAX_FROMS", 2)
+    found = checks_of("From: a@example.org, b@example.org, c@example.org")
+    assert (found["Free webmail sender"].result, found["Free webmail sender"].evidence) == (
+        INCONCLUSIVE, "example.org isn't on the free webmail list. Only the first 2 of 3 From addresses were checked")
+    # A flag in the ones checked still counts
+    assert checks_of("From: a@gmail.com, b@example.org, c@example.org")["Free webmail sender"].result == FLAG
+
+
+def test_spf_runs_once_since_it_doesnt_read_the_from(monkeypatch):
+    monkeypatch.setattr(headers, "MAX_FROMS", 2)
+    found = checks_of("Authentication-Results: mx.example.net; spf=pass",
+                      "From: a@example.org, b@example.org, c@example.org")
+    assert found["SPF"].result == PASS
+
+
+def test_the_lookalike_checks_read_every_from():
+    assert checks_of("From: service@paypal.com", "From: x@paypa1.com")["Lookalike domain"].result == FLAG
 
 
 def test_reply_to_without_a_from_domain_is_inconclusive():

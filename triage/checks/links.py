@@ -3,10 +3,10 @@ link open a web page at all, and was it put behind Google's redirect."""
 
 import re
 
-from .domains import TAB_OR_NEWLINE, TEXT_URL, decoded_base, domains_in_text, url_host
-from .html_reader import MAX_BASES
-from .link_wrappers import unwrap
-from .models import Check, ParsedEmail, Result, Strength, join_first_five
+from ..domains import TAB_OR_NEWLINE, TEXT_URL, decoded_base, domains_in_text, url_host
+from ..models import Check, ParsedEmail, Result, Strength, join_first_five
+from ..reading.html_reader import MAX_BASES
+from ..reading.link_wrappers import unwrap
 
 # Links that open a web page, an empty one (about:blank), an email, a call, a text or an
 # attached image (cid:), and the ones Apple Mail adds around dates and addresses. Anything

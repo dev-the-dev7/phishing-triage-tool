@@ -4,10 +4,11 @@ import functools
 import re
 from pathlib import Path
 
-from .domains import (base_domain, decode_idn, decoded_base, is_ip, lookalike_forms, normalize_unicode,
-                      registered_name, url_host)
-from .models import Address, Check, ParsedEmail, Result, Strength, for_each_from, join_first_five
-from .settings import ALLOWED_NAMES, BRANDS, EXECUTIVES, FREE_EMAIL_DOMAINS, JOIN_WORDS, OWN_DOMAINS, OWN_NAMES
+from .headers import for_each_from
+from ..domains import (base_domain, decode_idn, decoded_base, is_ip, lookalike_forms, normalize_unicode,
+                       registered_name, url_host)
+from ..models import Address, Check, ParsedEmail, Result, Strength, join_first_five
+from ..settings import ALLOWED_NAMES, BRANDS, EXECUTIVES, FREE_EMAIL_DOMAINS, JOIN_WORDS, OWN_DOMAINS, OWN_NAMES
 
 # Shorter brand names are one letter from ordinary words (apple: apply) and sit inside others
 # (pineapple), so an English word list decides what a typo or joined word means. They're

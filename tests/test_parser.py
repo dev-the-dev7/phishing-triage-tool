@@ -1,14 +1,14 @@
-"""Tests for triage/parser.py: refusing what isn't safe to parse, reading addresses and
-encoded text, and the warnings an analyst needs to see."""
+"""Tests for triage/reading/parser.py: refusing what isn't safe to parse, reading addresses
+and encoded text, and the warnings an analyst needs to see."""
 
 import hashlib
 
 import pytest
 
-from triage import parser
-from triage.impersonation import check_display_name
+from triage.checks.impersonation import check_display_name
 from triage.models import Address, ParsedEmail, Result
-from triage.parser import parse_bytes, parse_file
+from triage.reading import parser
+from triage.reading.parser import parse_bytes, parse_file
 
 UNREADABLE = "has an address the tool couldn't read safely"
 ATTACHED_EMAIL = "is an email attached to this one"

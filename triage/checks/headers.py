@@ -2,16 +2,21 @@
 free webmail."""
 
 import re
+from collections.abc import Callable
 from dataclasses import replace
 
-from .domains import base_domain, decode_idn, decoded_base
-from .models import Address, Check, ParsedEmail, Result, Strength, encoded_addresses, for_each_from, join_first_five
-from .settings import FREE_EMAIL_DOMAINS, TRUSTED_AUTHSERV_IDS
+from ..domains import base_domain, decode_idn, decoded_base
+from ..models import Address, Check, ParsedEmail, Result, Strength, encoded_addresses, join_first_five
+from ..settings import FREE_EMAIL_DOMAINS, TRUSTED_AUTHSERV_IDS
 
 
 # Results that count as a failure. Others besides pass (none, neutral, temperror) are
 # inconclusive: not a failure, but not verified either.
 AUTH_FAILURES = ("fail", "softfail", "permerror")
+
+# A check that compares the From runs once for each From address. Real mail has one, and on
+# thousands the Reply-To check alone would take minutes.
+MAX_FROMS = 10
 
 
 def check_spf(parsed: ParsedEmail) -> Check:
@@ -206,6 +211,25 @@ def _without_quotes_or_comments(header: str) -> tuple[str, bool]:
         else:
             kept.append(ch)
     return "".join(kept), bool(quoted or depth)
+
+
+def for_each_from(from_addrs: list[Address], check: Callable[[Address | None], Check]) -> Check:
+    # Mail clients don't agree on which From they show, so the check runs on each, or on None
+    # when there's no From address to read. Any flag counts, and a pass needs them all.
+    runs = [check(from_addr) for from_addr in from_addrs[:MAX_FROMS] or [None]]
+    unchecked = max(len(from_addrs) - MAX_FROMS, 0)
+    if len(runs) == 1 and not unchecked:
+        return runs[0]
+    result = next(r for r in (Result.FLAG, Result.INCONCLUSIVE, Result.PASS) if any(c.result == r for c in runs))
+    matching = [run for run in runs if run.result == result]
+    evidence = join_first_five(list(dict.fromkeys(run.evidence for run in matching)))
+    if result == Result.PASS and unchecked:
+        result = Result.INCONCLUSIVE
+        evidence += f". Only the first {len(runs)} of {len(from_addrs):,} From addresses were checked"
+    return Check(matching[0].name, result, matching[0].strength, evidence,
+                 list(dict.fromkeys(caveat for run in runs for caveat in run.caveats)),
+                 list(dict.fromkeys(domain for run in matching for domain in run.domains)),
+                 list(dict.fromkeys(ip for run in matching for ip in run.ips)))
 
 
 def check_ambiguous_from(parsed: ParsedEmail) -> list[Check]:

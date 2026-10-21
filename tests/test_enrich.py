@@ -1,5 +1,6 @@
-"""Tests for the reputation lookups (triage/enrich.py). Every answer is made up here, and
-nothing goes online: requests.get is replaced, and conftest.py makes any real connection fail."""
+"""Tests for the reputation lookups (triage/enrich.py) and the checks on their results
+(triage/checks/lookups.py). Every answer is made up here, and nothing goes online:
+requests.get is replaced, and conftest.py makes any real connection fail."""
 
 import json
 from pathlib import Path
@@ -9,7 +10,8 @@ import pytest
 import requests
 
 from triage import enrich
-from triage.enrich import check_domain_age, check_microsoft_hops, look_up
+from triage.checks.lookups import check_domain_age, check_microsoft_hops
+from triage.enrich import look_up
 from triage.models import Attachment, Indicators, LookupStatus, Origin, Reputation, Result
 
 VT = "https://www.virustotal.com/api/v3"

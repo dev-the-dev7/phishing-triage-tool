@@ -19,8 +19,9 @@ import requests
 
 import triage
 import triage.__main__ as cli
-from triage import enrich, impersonation
+from triage import enrich
 from triage.__main__ import main
+from triage.checks import impersonation
 from triage.models import LookupStatus, Reputation
 
 FIXTURES = Path(__file__).parent / "fixtures"

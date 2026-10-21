@@ -1,9 +1,10 @@
-"""Tests for triage/iocs.py: indicators from an email or from alert text, and refang/defang."""
+"""Tests for triage/reading/iocs.py: indicators from an email or from alert text, and
+refang/defang."""
 
 import pytest
 
-from triage.iocs import defang, defang_text, from_email, from_text, refang
 from triage.models import Address, Attachment, Indicators, Link, Origin, ParsedEmail
+from triage.reading.iocs import defang, defang_text, from_email, from_text, refang
 
 SHA256 = "043ea8960dc71f654cf0ac9ac501c16d09eed7b0e1528532fe25f122f1cc4f35"
 SHA1 = "a9993e364706816aba3e25717850c26c9cd0d89d"

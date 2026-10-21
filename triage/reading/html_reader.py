@@ -7,8 +7,8 @@ from html.parser import HTMLParser
 from itertools import groupby
 from urllib.parse import urljoin
 
-from .domains import C0_OR_SPACE, TAB_OR_NEWLINE, browser_url, domains_in_text, normalize_unicode, url_host
-from .models import Link
+from ..domains import C0_OR_SPACE, TAB_OR_NEWLINE, browser_url, domains_in_text, normalize_unicode, url_host
+from ..models import Link
 
 # Real emails have one <base> tag at most. Every link is read against each, so thousands of
 # both would take minutes.

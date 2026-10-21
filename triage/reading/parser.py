@@ -6,11 +6,11 @@ import hashlib
 from dataclasses import replace
 from email.utils import getaddresses
 
-from .domains import urls_in_text
 from .html_reader import read_html
 from .iocs import defang
 from .link_wrappers import destinations, through_google
-from .models import Address, Attachment, Link, ParsedEmail, encoded_addresses, join_first_five
+from ..domains import urls_in_text
+from ..models import Address, Attachment, Link, ParsedEmail, encoded_addresses, join_first_five
 
 # Microsoft 365's largest allowed message. A bigger file isn't a real email, and the
 # email library needs several times the file's size in memory.

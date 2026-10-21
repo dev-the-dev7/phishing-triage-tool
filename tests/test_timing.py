@@ -7,13 +7,13 @@ import time
 import pytest
 
 from triage.checks import run_checks
-from triage.headers import check_dkim, check_dmarc, check_spf
-from triage.impersonation import check_brand_joined, check_lookalike
-from triage.iocs import from_email, from_text
-from triage.link_wrappers import destinations, unwrap
+from triage.checks.headers import check_dkim, check_dmarc, check_spf
+from triage.checks.impersonation import check_brand_joined, check_lookalike
 from triage.models import Link, ParsedEmail
-from triage.parser import parse_bytes
-from triage.received import find_origin, received_warnings
+from triage.reading.iocs import from_email, from_text
+from triage.reading.link_wrappers import destinations, unwrap
+from triage.reading.origin import find_origin, received_warnings
+from triage.reading.parser import parse_bytes
 
 
 def seconds(task) -> float:

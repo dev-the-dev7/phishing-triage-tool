@@ -3,8 +3,8 @@ matters. They never change a check's result, and finding none says nothing about
 
 from dataclasses import dataclass
 
-from .domains import decode_idn, url_host
-from .models import Check, ParsedEmail, Result
+from ..domains import decode_idn, url_host
+from ..models import Check, ParsedEmail, Result
 
 
 @dataclass
