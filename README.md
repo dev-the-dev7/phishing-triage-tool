@@ -57,9 +57,10 @@ Planned:
 
 ## Setting up the lookups
 
-`--enrich` needs a free API key from [VirusTotal](https://www.virustotal.com) and one from
-[AbuseIPDB](https://www.abuseipdb.com). The tool reads them from environment variables. In
-PowerShell:
+`--enrich` needs an API key from [VirusTotal](https://www.virustotal.com) and one from
+[AbuseIPDB](https://www.abuseipdb.com). Its limits are set for the free keys, so with your
+organization's paid keys, raise them in `triage/settings.py`. The tool reads the keys from
+environment variables. In PowerShell:
 
 ```powershell
 # For this window only. Read-Host keeps the key out of PowerShell's history file, which
@@ -82,8 +83,7 @@ includes the company's root certificate.
 
 ## Your organization's settings
 
-What the checks compare against that's yours to change is in `triage/settings.py`, in two
-parts.
+What's yours to change is in `triage/settings.py`, in three parts.
 
 The first part is about your organization and ships empty, so its checks do nothing until
 you fill it in: your names and domains (`OWN_NAMES`, `OWN_DOMAINS`), executives attackers
@@ -91,11 +91,18 @@ might pose as (`EXECUTIVES`), and your provider's server name if it might not ad
 Authentication-Results (`TRUSTED_AUTHSERV_IDS`). Your names and executives need
 `OWN_DOMAINS` too.
 
-The rest comes filled in with what turns up in most mail: brands, webmail providers, the
+The second comes filled in with what turns up in most mail: brands, webmail providers, the
 words phishers join to a brand's name (`JOIN_WORDS`), and words that look like a brand
 but aren't (`ALLOWED_NAMES`). Add to it, or take out what doesn't fit yours. A supplier
 or partner you get mail from goes in `BRANDS` with its domains, so someone posing as them
 is flagged too.
+
+The last is how many lookups `--enrich` makes, set for the free keys. With your
+organization's paid keys, raise them to what the keys allow: `VT_LOOKUPS_PER_RUN` and
+`ABUSEIPDB_LOOKUPS_PER_RUN` a run, and `VT_LOOKUPS_PER_MINUTE`. At the limit a minute the
+tool waits, then carries on until the limit a run. A key with no limit a minute can set
+it as high as the limit a run, so it never waits. There's always a limit a run, so an
+email with hundreds of links can't send a lookup for each.
 
 Each setting is explained where it's set. After changing any of them, check your entries,
 with the test tools from `requirements-dev.txt` installed:
@@ -104,9 +111,9 @@ with the test tools from `requirements-dev.txt` installed:
 python -m pytest tests/test_settings.py
 ```
 
-The full test suite checks the tool against the lists as they ship, so after changing them
-some of its tests can fail without anything being wrong. `tests/test_settings.py` is the
-one that checks your changes.
+The full test suite checks the tool against the second part's lists as they ship, so after
+changing them some of its tests can fail without anything being wrong. The first and last
+parts don't affect it. `tests/test_settings.py` is the one that checks your changes.
 
 ## Design decisions
 
@@ -488,26 +495,27 @@ one that checks your changes.
   (`%2540`) inside a link it carries, isn't looked up at all, and its domain is looked up
   instead.
 
-- **The free limits decide the order.** VirusTotal's free key allows 4 lookups a minute and
-  500 a day, so a run sends at most 8, waiting when it has to, and AbuseIPDB gets at most
-  10. AbuseIPDB has no limit a minute, so its lookups go first and are done before any
-  wait. For AbuseIPDB, the origin goes first, then the hops named as Microsoft's servers
-  from the top down, so fake ones added below can't push the real sender's past the limit.
-  For VirusTotal, attachments go first, then domains the lookalike and brand-joined checks
-  flagged, the sender's domains, the domains links go to, the links, pictures, and IPs,
-  which AbuseIPDB covers too. The sender's domains come before the links' because there are
-  only one to three, and an email can link to a dozen domains and use up every lookup.
-  Pictures are mostly logos, like the ones in an Outlook signature, and VirusTotal rarely
-  has them. A picture is declared as one and named like one (`.png`, `.jpg`), so it opens
-  in a picture viewer and can't run. An SVG can hold scripts, so it goes first with the
-  other files. The brands' real domains, free webmail, and links to them go last. Anything
-  past the limit is shown as skipped. A run only counts its own lookups, so one started
-  straight after another can find VirusTotal's minute used up. It then waits a minute and
-  tries once more, and if it's refused again, the day's limit was reached. When a key is
-  refused, the day's limit is reached, a service can't be reached, or a proxy or sign-in
-  page answers for it, the rest of its lookups show as unavailable without being sent.
-  Ctrl+C during a wait does the same for both services, so the indicators are still shown,
-  and a second Ctrl+C stops the tool.
+- **The limits decide the order.** VirusTotal's free key allows 4 lookups a minute and 500
+  a day, so as shipped a run sends at most 8, waiting when it has to, and AbuseIPDB gets
+  at most 10. A paid key's limits are set in `settings.py`. AbuseIPDB has no limit a
+  minute, so its lookups go first and are done before any wait. For AbuseIPDB, the origin
+  goes first, then the hops named as Microsoft's servers from the top down, so fake ones
+  added below can't push the real sender's past the limit. For VirusTotal, attachments go
+  first, then domains the lookalike and brand-joined checks flagged, the sender's domains,
+  the domains links go to, the links, pictures, and IPs, which AbuseIPDB covers too. The
+  sender's domains come before the links' because there are only one to three, and an
+  email can link to a dozen domains and use up every lookup. Pictures are mostly logos,
+  like the ones in an Outlook signature, and VirusTotal rarely has them. A picture is
+  declared as one and named like one (`.png`, `.jpg`), so it opens in a picture viewer and
+  can't run. An SVG can hold scripts, so it goes first with the other files. The brands'
+  real domains, free webmail, and links to them go last. Anything past the limit is shown
+  as skipped. A run only counts its own lookups, so one started straight after another can
+  find VirusTotal's minute used up, and so can a run whose limit a minute is set higher
+  than the key allows. It then waits a minute and tries once more, and if it's refused
+  again, the day's limit was reached. When a key is refused, the day's limit is reached, a
+  service can't be reached, or a proxy or sign-in page answers for it, the rest of its
+  lookups show as unavailable without being sent. Ctrl+C during a wait does the same for
+  both services, so the indicators are still shown, and a second Ctrl+C stops the tool.
 
 - **With `--enrich`, the report prints once the lookups are done,** so the checks that need
   them sort in with the rest. Waits are said on stderr as they happen. A lookup missed for
@@ -693,7 +701,7 @@ one that checks your changes.
 
 - **VirusTotal's free key is for personal use.** Its terms say the free API "must not be
   used in commercial products or services" or in business workflows. Triage at work needs
-  your organization's paid key.
+  your organization's paid key, with its limits in `settings.py`.
 
 - **Reputation lags behind new phishing.** A domain registered this morning is usually not
   found or clean, and so is a link made for one reader. A clean result is no reason to
@@ -710,8 +718,9 @@ one that checks your changes.
   in.** Until then, a name like `wks-0231.corp.contoso.com` in alert text is looked up like
   any other domain.
 
-- **8 VirusTotal lookups don't cover an email with many links or a long alert.** The rest
-  are shown as skipped. With a paid key, raise `MAX_VT_LOOKUPS` in `enrich.py`.
+- **The free key's 8 VirusTotal lookups don't cover an email with many links or a long
+  alert.** The rest are shown as skipped. With a paid key, raise `VT_LOOKUPS_PER_RUN` in
+  `settings.py`.
 
 - **Links to forms and files on a brand's own domain go last**, with the brand's real
   links, so in an email past the limit they can be skipped. Phishing pages are often made

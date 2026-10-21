@@ -30,6 +30,10 @@ def settings_as_shipped(monkeypatch):
     monkeypatch.setattr(enrich, "OWN_DOMAINS", [])
     # Names you add to ALLOWED_NAMES would change what the tests expect, so they get the shipped ones
     monkeypatch.setattr(impersonation, "ALLOWED_NAMES", {"mega", "metadata"})
+    # So would a paid key's lookup limits
+    monkeypatch.setattr(enrich, "VT_LOOKUPS_PER_RUN", 8)
+    monkeypatch.setattr(enrich, "VT_LOOKUPS_PER_MINUTE", 4)
+    monkeypatch.setattr(enrich, "ABUSEIPDB_LOOKUPS_PER_RUN", 10)
 
 
 class FakeTime:

@@ -515,6 +515,21 @@ def test_abuseipdb_limit(server, monkeypatch):
     assert all(results[ip][0].for_the_run for ip in ips[10:])
 
 
+def test_a_paid_keys_limits(server, keys, monkeypatch, clock):
+    # Raised in settings.py. A key with no limit a minute sets it as high as the limit a run,
+    # so nothing waits.
+    monkeypatch.setattr(enrich, "VT_LOOKUPS_PER_RUN", 20)
+    monkeypatch.setattr(enrich, "VT_LOOKUPS_PER_MINUTE", 20)
+    monkeypatch.setattr(enrich, "ABUSEIPDB_LOOKUPS_PER_RUN", 15)
+    ips = [f"8.8.8.{n}" for n in range(12)]
+    results = look_up(Indicators(domains=[f"site{n}.com" for n in range(12)], ips=ips))
+    asked = server.asked()
+    assert len([a for a in asked if a.startswith(VT)]) == 20
+    assert len([a for a in asked if a.startswith(ABUSEIPDB)]) == 12
+    assert texts(results)[ips[-1]][-1] == "VirusTotal: skipped, over the limit of 20 lookups a run"
+    assert clock.slept == []
+
+
 @pytest.mark.parametrize("failure, reason", [
     ((401, {"error": {"code": "WrongCredentialsError"}}), "the key in VT_API_KEY was refused"),
     ((403, {"error": {"code": "ForbiddenError"}}), "the key in VT_API_KEY was refused"),

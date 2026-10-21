@@ -20,7 +20,8 @@ from .domains import TLDS, ascii_domain, base_domain, decode_idn, hosting_servic
 from .iocs import EMAIL
 from .models import Attachment, Check, Indicators, LookupStatus, Origin, Reputation, Result, Strength, join_first_five
 from .received import MICROSOFT_SERVER_DOMAINS
-from .settings import BRANDS, FREE_EMAIL_DOMAINS, OWN_DOMAINS
+from .settings import (ABUSEIPDB_LOOKUPS_PER_RUN, BRANDS, FREE_EMAIL_DOMAINS, OWN_DOMAINS, VT_LOOKUPS_PER_MINUTE,
+                       VT_LOOKUPS_PER_RUN)
 
 # A file is looked up by its hash and never uploaded, since an upload is shared with every
 # VirusTotal customer. Scanning a URL would take a POST, so a URL VirusTotal hasn't seen
@@ -29,15 +30,9 @@ VT_API = "https://www.virustotal.com/api/v3"
 VT_COLLECTIONS = {"file": "files", "domain": "domains", "ip": "ip_addresses", "url": "urls"}
 ABUSEIPDB_CHECK = "https://api.abuseipdb.com/api/v2/check"
 
-# The free VirusTotal key allows 4 lookups a minute and 500 a day. 8 keeps a run to about a
-# minute, and leaves room for 60 runs a day.
-MAX_VT_LOOKUPS = 8
-VT_PER_MINUTE = 4
 # A limit's minute is counted as 61 seconds, since the service counts when a lookup arrives,
 # not when it was sent
 LIMIT_MINUTE = 61
-# The free AbuseIPDB key allows 1,000 lookups a day
-MAX_ABUSEIPDB_LOOKUPS = 10
 # Only reports from the last 90 days count, since an IP abused long ago may have a new owner
 ABUSEIPDB_DAYS = 90
 # A domain registered this recently is flagged, a common cut-off for newly registered
@@ -119,8 +114,8 @@ def look_up(found: Indicators, attachments: list[Attachment] | None = None, flag
     # domains are. The attachments are only used to tell pictures from other files, and
     # flagged are the domains the lookalike and brand-joined checks flagged. The origin's
     # hops taken as Microsoft's get AbuseIPDB lookups too, for their owners.
-    virustotal = _Service("VirusTotal", "VT_API_KEY", MAX_VT_LOOKUPS, VT_PER_MINUTE)
-    abuseipdb = _Service("AbuseIPDB", "ABUSEIPDB_API_KEY", MAX_ABUSEIPDB_LOOKUPS)
+    virustotal = _Service("VirusTotal", "VT_API_KEY", VT_LOOKUPS_PER_RUN, VT_LOOKUPS_PER_MINUTE)
+    abuseipdb = _Service("AbuseIPDB", "ABUSEIPDB_API_KEY", ABUSEIPDB_LOOKUPS_PER_RUN)
     # AbuseIPDB first: it has no limit a minute, so its lookups are done before any wait for
     # VirusTotal that Ctrl+C might cut short
     order = _virustotal_order(found, attachments or [], flagged or [])
@@ -241,7 +236,7 @@ def _abuseipdb_order(found: Indicators, origin: Origin | None) -> list[str]:
 
 
 def _virustotal_order(found: Indicators, attachments: list[Attachment], flagged: list[str]) -> list[tuple[str, str]]:
-    # Only MAX_VT_LOOKUPS are sent, so what's most likely to matter goes first: attachments,
+    # Only VT_LOOKUPS_PER_RUN are sent, so what's most likely to matter goes first: attachments,
     # flagged lookalikes (their age is the best evidence for or against them), sender domains
     # (only one to three), link domains, links (often made for each reader, so rarely known),
     # pictures (mostly signature logos), then IPs, which AbuseIPDB covers too.
@@ -387,8 +382,9 @@ def _virustotal_path(kind: str, value: str) -> str:
 def _get(service: _Service, url: str, headers: dict, params: dict | None = None) -> tuple[int, object]:
     status, data = _send(service, url, headers, params)
     if status == 429 and service.per_minute:
-        # A run only counts its own lookups, so an earlier run may have used up this minute.
-        # Tried once more a minute later. Refused again means the day's limit was reached.
+        # A run only counts its own lookups, so an earlier run may have used up this minute,
+        # and VT_LOOKUPS_PER_MINUTE can be set higher than the key allows. Tried once more a
+        # minute later. Refused again means the day's limit was reached.
         print(f"{service.name}'s limit was reached, maybe by an earlier run in the last minute. "
               f"Waiting {LIMIT_MINUTE} seconds to try once more (Ctrl+C skips the rest of the lookups)",
               file=sys.stderr)

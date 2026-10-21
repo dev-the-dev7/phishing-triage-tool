@@ -1,7 +1,7 @@
-"""What the checks compare against that's yours to change. The first part is about your
-organization and ships empty: fill it in. The rest comes filled in with what turns up in most
-mail: add to it, or take out what doesn't fit yours. Then run python -m pytest
-tests/test_settings.py to check your changes."""
+"""What's yours to change. The first part is about your organization and ships empty: fill it
+in. The second comes filled in with what turns up in most mail: add to it, or take out what
+doesn't fit yours. The last is how many lookups --enrich makes, set for the free keys. Then run
+python -m pytest tests/test_settings.py to check your changes."""
 
 # === Your organization ===
 # Empty as shipped, so these checks do nothing until you fill them in.
@@ -91,3 +91,16 @@ FREE_EMAIL_DOMAINS: set[str] = {
     # Privacy-focused
     "proton.me", "protonmail.com", "tuta.com", "tutanota.com", "fastmail.com",
 }
+
+
+# === Lookups with --enrich ===
+# Set for the free keys. With your organization's paid keys, raise these to what they allow.
+
+# The free VirusTotal key allows 4 lookups a minute and 500 a day. At the limit a minute the
+# tool waits, then carries on until the limit a run, so 8 takes about a minute and leaves
+# room for 60 runs a day. A multiple of the limit a minute uses all of each minute it waits
+# for. A key with no limit a minute can set it as high as the limit a run, so it never waits.
+VT_LOOKUPS_PER_RUN: int = 8
+VT_LOOKUPS_PER_MINUTE: int = 4
+# The free AbuseIPDB key allows 1,000 lookups a day, and has no limit a minute
+ABUSEIPDB_LOOKUPS_PER_RUN: int = 10

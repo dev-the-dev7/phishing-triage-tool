@@ -1,5 +1,5 @@
-"""Tests for triage/settings.py: entries are written the way the checks compare them, so an
-edit for your own organization doesn't quietly stop matching."""
+"""Tests for triage/settings.py: entries are written the way the tool reads them, so an edit for
+your own organization doesn't break a check or the lookups."""
 
 import re
 
@@ -71,3 +71,11 @@ def test_your_domains_are_written_as_domain_names():
 def test_your_names_and_executives_come_with_your_domains():
     # Without OWN_DOMAINS your names aren't checked, and your executives' own mail is flagged
     assert OWN_DOMAINS or not (OWN_NAMES or EXECUTIVES), "fill in OWN_DOMAINS in settings.py"
+
+
+@pytest.mark.parametrize("name", ["VT_LOOKUPS_PER_RUN", "VT_LOOKUPS_PER_MINUTE", "ABUSEIPDB_LOOKUPS_PER_RUN"])
+def test_lookup_limits_are_whole_numbers(name):
+    # Text, or a fraction a minute, would stop --enrich partway, and True counts as 1. 0 a run
+    # would send nothing, and 0 a minute would send without waiting.
+    limit = getattr(settings, name)
+    assert type(limit) is int and limit >= 1, f"write {name} as a whole number of at least 1"
