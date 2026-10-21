@@ -26,6 +26,17 @@ def test_a_lookalike_that_passes_authentication():
     assert found([Check("DMARC", "flag", "strong", ""), LOOKALIKE], from_addrs=LOOKALIKE_FROM) == []
 
 
+def test_a_dkim_pass_doesnt_count_once_dmarc_fails():
+    # An envelope address with an unquoted ; can add a DKIM pass to your provider's header
+    dkim = Check("DKIM", "pass", "medium", "")
+    dmarc_fail = Check("DMARC", "flag", "strong", "")
+    assert found([dmarc_fail, dkim, LOOKALIKE], links=LOOKALIKE_LINK) == []
+    assert found([dmarc_fail, dkim, LOOKALIKE], from_addrs=LOOKALIKE_FROM) == []
+    # A domain with no DMARC record has only DKIM to go by
+    assert found([Check("DMARC", "inconclusive", "strong", ""), dkim, LOOKALIKE], links=LOOKALIKE_LINK) == [
+        ("Authenticated sender with a lookalike link", ["DKIM", "Lookalike domain"])]
+
+
 def test_a_unicode_lookalike_is_matched_as_the_reader_sees_it():
     # The lookalike check names the domain as it displays, and the From and links have its xn-- form
     parsed = ParsedEmail(from_addrs=[Address("", "a@xn--pypal-4ve.com", "xn--pypal-4ve.com")])

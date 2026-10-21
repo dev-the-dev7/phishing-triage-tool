@@ -21,6 +21,9 @@ def find_patterns(parsed: ParsedEmail, checks: list[Check]) -> list[Pattern]:
     # Both only pass for the From's own domain, so the email really came from it
     authenticated = [name for name in ("DMARC", "DKIM")
                      if any(check.name == name and check.result == Result.PASS for check in checks)]
+    if "DMARC" in flagged:
+        # DMARC couldn't authenticate the From, so a DKIM pass read here can be text the sender added
+        authenticated = []
     lookalikes = set(flagged["Lookalike domain"].domains) if "Lookalike domain" in flagged else set()
     from_lookalike = any(decode_idn(a.domain) in lookalikes for a in parsed.from_addrs if a.domain)
     patterns = []
