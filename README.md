@@ -80,6 +80,34 @@ Behind a proxy that inspects TLS, as many company networks have, the lookups sho
 unavailable with `SSLError` until `REQUESTS_CA_BUNDLE` points to a certificate file that
 includes the company's root certificate.
 
+## Your organization's settings
+
+What the checks compare against that's yours to change is in `triage/settings.py`, in two
+parts.
+
+The first part is about your organization and ships empty, so its checks do nothing until
+you fill it in: your names and domains (`OWN_NAMES`, `OWN_DOMAINS`), executives attackers
+might pose as (`EXECUTIVES`), and your provider's server name if it might not add its own
+Authentication-Results (`TRUSTED_AUTHSERV_IDS`). Your names and executives need
+`OWN_DOMAINS` too.
+
+The rest comes filled in with what turns up in most mail: brands, webmail providers, the
+words phishers join to a brand's name (`JOIN_WORDS`), and words that look like a brand
+but aren't (`ALLOWED_NAMES`). Add to it, or take out what doesn't fit yours. A supplier
+or partner you get mail from goes in `BRANDS` with its domains, so someone posing as them
+is flagged too.
+
+Each setting is explained where it's set. After changing any of them, check your entries,
+with the test tools from `requirements-dev.txt` installed:
+
+```powershell
+python -m pytest tests/test_settings.py
+```
+
+The full test suite checks the tool against the lists as they ship, so after changing them
+some of its tests can fail without anything being wrong. `tests/test_settings.py` is the
+one that checks your changes.
+
 ## Design decisions
 
 ### Results and safety
@@ -236,7 +264,7 @@ includes the company's root certificate.
   the same list to keep one site's cookies away from another's. A copy ships with the
   tool (`triage/public_suffix_list.dat`, under the Mozilla Public License 2.0), so it
   works offline, and the tool reads its rules itself. A few hosting services the list
-  doesn't have yet are added in `lists.py`. A domain written in text also has to end in
+  doesn't have yet are added in `domains.py`. A domain written in text also has to end in
   a real TLD, or one that looks like it to the reader (`.com` with a Cyrillic `о`), so
   `invoice.pdf` and `Thanks.Regards` aren't read as domains.
 
@@ -266,12 +294,13 @@ includes the company's root certificate.
   works offline. A typo that isn't a word (`appie.com`, `metq.com`) is flagged. One that
   is a word is inconclusive, since it can be harmless (`apply.com`) or a typosquat
   (`appel.com`). A short name joined to a word phishers use (`appleid.com`, `mymeta.com`,
-  from `JOIN_WORDS` in `lists.py`) is flagged, inside an English word (`pineapple.com`) it
-  passes, and inside anything else (`applebyfarms.com`) it's inconclusive. `ALLOWED_NAMES`
-  passes the rest: it ships with newer words the list lacks (`mega`, `metadata`), and real
-  names that come up in your own mail, like a supplier's, can be added there. So in the
-  registered domain, nothing one letter from a short name or holding it passes, except a
-  longer English word holding it or a name you've listed.
+  from `JOIN_WORDS` in `settings.py`) is flagged, inside an English word (`pineapple.com`)
+  it passes, and inside anything else (`applebyfarms.com`) it's inconclusive.
+  `ALLOWED_NAMES` passes the rest: it ships with newer words the list lacks (`mega`,
+  `metadata`), and others from your own mail (`metaverse`) can be added there. A supplier
+  is better added to `BRANDS` with its domains, which also flags someone posing as them.
+  So in the registered domain, nothing one letter from a short name or holding it passes,
+  except a longer English word holding it, a word you've allowed, or a brand's own domain.
 
 - **Links are read the way a browser reads them.** Python's URL parser disagrees with
   browsers in ways phishers use. A browser treats `\` as `/`, so
@@ -503,19 +532,20 @@ includes the company's root certificate.
 
 ### Lists and configuration
 
-- **The brand list in `triage/lists.py` is short.** It's a starting point, not a complete
-  list.
+- **The brand list in `triage/settings.py` is short.** It's a starting point, not a
+  complete list.
 
 - **Brands use more real domains than `BRANDS` lists** (Google alone has hundreds). An
-  unlisted real domain gets flagged as a lookalike, and the analyst has to judge it.
+  unlisted real domain gets flagged as a lookalike, and the analyst has to judge it, or
+  add it to that brand's domains.
 
 - **Free webmail providers missing from `FREE_EMAIL_DOMAINS` are treated like company
   domains.** A Reply-To pointing to a different account on the same unlisted provider
   isn't flagged, and neither is the free sender.
 
-- **`OWN_NAMES`, `OWN_DOMAINS`, and `EXECUTIVES` start empty.** Lookalikes of your own
-  domain, your company's name in a display name ("Contoso IT Support" from Gmail), and
-  executive impersonation are only caught once you fill them in.
+- **`OWN_NAMES`, `OWN_DOMAINS`, and `EXECUTIVES` in `triage/settings.py` start empty.**
+  Lookalikes of your own domain, your company's name in a display name ("Contoso IT
+  Support" from Gmail), and executive impersonation are only caught once you fill them in.
 
 - **The Public Suffix List is only as new as the copy.** An ending added since it was
   downloaded isn't known until it's updated: a name under it is compared by its last two
@@ -577,7 +607,8 @@ includes the company's root certificate.
 - **A brand joined to another word (`paypalsecure.com`) is only a weak flag**, because
   brands own domains like that too (`googleapis.com`). A short brand name joined to a word
   that isn't in `JOIN_WORDS` or the word list is inconclusive, which includes real company
-  names (`applebyfarms.com`) until they're added to `ALLOWED_NAMES`.
+  names (`applebyfarms.com`) until they're added to `BRANDS` with their domains, or to
+  `ALLOWED_NAMES` when you don't get mail from them.
 
 - **Typos of short brand names are only checked in the registered domain name**, not in
   subdomains, so `appel.example.com` isn't flagged. A phisher can write the real name in a

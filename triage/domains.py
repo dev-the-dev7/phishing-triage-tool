@@ -7,8 +7,6 @@ from datetime import date
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from .lists import SHARED_HOSTING
-
 # The mail system's own servers. Not Python's is_private, which misses carrier-grade NAT and
 # includes reserved ranges. A hop from one of those was made up and should stay visible.
 INTERNAL_NETWORKS = [ipaddress.ip_network(n) for n in (
@@ -45,10 +43,23 @@ def list_date(text: str) -> date | None:
     return date.fromisoformat(found.group(1)) if found else None
 
 
+# Hosting where every customer gets a subdomain, so paypal-login.github.io and
+# my-blog.github.io have different owners. Phishers use these since most are free and come
+# with HTTPS. Added to the Public Suffix List for the few it lacks.
+SHARED_HOSTING: set[str] = {
+    "github.io", "web.app", "firebaseapp.com", "pages.dev", "workers.dev",
+    "netlify.app", "vercel.app", "herokuapp.com", "azurewebsites.net", "amazonaws.com",
+    "blogspot.com", "wixsite.com", "weebly.com", "glitch.me",
+    # Cloud hosting, storage and tunnels: Google App Engine, Azure storage, Cloudflare R2
+    # and Cloudflare's free tunnels
+    "appspot.com", "blob.core.windows.net", "web.core.windows.net", "r2.dev", "trycloudflare.com",
+    # Microsoft 365 tenants. Attackers sign up for free trials to send from these.
+    "onmicrosoft.com", "sharepoint.com",
+}
+
 _suffix_list = PUBLIC_SUFFIX_FILE.read_text(encoding="utf-8")
 SUFFIXES, WILDCARDS, EXCEPTIONS = _read_suffixes(_suffix_list)
 SUFFIX_LIST_DATE = list_date(_suffix_list)
-# Hosting services the list doesn't have yet
 SUFFIXES |= SHARED_HOSTING
 ALL_RULES = (SUFFIXES, WILDCARDS, EXCEPTIONS)
 # The list's first section, the endings registries sell names under. The private section after

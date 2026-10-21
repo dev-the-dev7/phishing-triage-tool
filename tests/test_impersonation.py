@@ -5,8 +5,8 @@ import pytest
 from triage import impersonation
 from triage.impersonation import (LONG_NAME_LENGTH, MIN_NAME_LENGTH, _english_words, _one_typo_apart,
                                   check_brand_joined, check_display_name, check_lookalike)
-from triage.lists import BRANDS
 from triage.models import Address, Link, ParsedEmail, Result
+from triage.settings import BRANDS
 
 
 def link_to(domain: str) -> ParsedEmail:
@@ -211,6 +211,9 @@ def test_allowed_names_pass(monkeypatch):
     monkeypatch.setattr(impersonation, "ALLOWED_NAMES", {"metra"})
     assert check_lookalike(link_to("metra.com")).result == Result.PASS
     assert check_brand_joined(link_to("applebees.com")).result == Result.INCONCLUSIVE
+    # And English words, which would otherwise be left to the analyst
+    monkeypatch.setattr(impersonation, "ALLOWED_NAMES", {"beta"})
+    assert check_lookalike(link_to("beta.com")).result == Result.PASS
 
 
 def test_names_under_four_letters_arent_typo_checked(monkeypatch):
@@ -357,7 +360,7 @@ def test_display_name_shows_the_address_it_hides():
     assert "shows an address at paypal.com but the mail is from evil.com" in check.evidence
 
 
-# impersonation.py imports the lists by name, so they're replaced there, not in lists.py
+# impersonation.py imports the settings by name, so they're replaced there, not in settings.py
 
 @pytest.mark.parametrize("display_name", [
     "Ian Wright", "IAN WRIGHT", "Wright, Ian", "Ian Wright (CEO)",

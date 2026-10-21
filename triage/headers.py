@@ -5,8 +5,8 @@ import re
 from dataclasses import replace
 
 from .domains import base_domain
-from .lists import FREE_EMAIL_DOMAINS, TRUSTED_AUTHSERV_IDS
 from .models import Address, Check, ParsedEmail, Result, Strength, encoded_addresses, for_each_from, join_first_five
+from .settings import FREE_EMAIL_DOMAINS, TRUSTED_AUTHSERV_IDS
 
 
 # Results that count as a failure. Others besides pass (none, neutral, temperror) are

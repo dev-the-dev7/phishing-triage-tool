@@ -19,10 +19,10 @@ def no_network(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def lists_as_shipped(monkeypatch):
-    # lists.py is meant to be filled in for your own organization, and the tests expect these
-    # empty, the way it ships. They're emptied where the checks import them, so lists.py
-    # keeps your entries for test_lists.py to check. A test that needs one sets it itself.
+def settings_as_shipped(monkeypatch):
+    # The first part of settings.py is meant to be filled in for your own organization, and
+    # the tests expect it empty, the way it ships. It's emptied where the checks import it, so
+    # settings.py keeps your entries for test_settings.py to check. A test that needs one sets it.
     monkeypatch.setattr(headers, "TRUSTED_AUTHSERV_IDS", set())
     monkeypatch.setattr(impersonation, "OWN_NAMES", set())
     monkeypatch.setattr(impersonation, "OWN_DOMAINS", [])

@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from triage.domains import (LOOKALIKE_CHARS, ascii_domain, base_domain, decode_idn, domains_in_text, hosting_service,
-                            list_date, lookalike_forms, normalize_unicode, registered_name, unmask_lookalikes,
-                            url_host)
+from triage.domains import (LOOKALIKE_CHARS, SHARED_HOSTING, ascii_domain, base_domain, decode_idn, domains_in_text,
+                            hosting_service, list_date, lookalike_forms, normalize_unicode, registered_name,
+                            unmask_lookalikes, url_host)
 
 
 def fullwidth(text: str) -> str:
@@ -219,6 +219,14 @@ def test_base_domain_passes_the_public_suffix_list_tests(host, registrable):
 ])
 def test_list_date(text, published):
     assert list_date(text) == published
+
+
+@pytest.mark.parametrize("suffix", sorted(SHARED_HOSTING))
+def test_shared_hosting_keeps_the_customer_label(suffix):
+    # Matched against the end of a host, which has no dot at either end. Checked on its
+    # own, since ".github.io" would also make the host below end in "..github.io".
+    assert suffix == suffix.strip(".")
+    assert base_domain(f"login.customer.{suffix}") == f"customer.{suffix}"
 
 
 @pytest.mark.parametrize("domain, service", [

@@ -18,9 +18,9 @@ import requests
 
 from .domains import TLDS, ascii_domain, base_domain, decode_idn, hosting_service, is_ip, url_host
 from .iocs import EMAIL
-from .lists import BRANDS, FREE_EMAIL_DOMAINS, OWN_DOMAINS
 from .models import Attachment, Check, Indicators, LookupStatus, Origin, Reputation, Result, Strength, join_first_five
 from .received import MICROSOFT_SERVER_DOMAINS
+from .settings import BRANDS, FREE_EMAIL_DOMAINS, OWN_DOMAINS
 
 # A file is looked up by its hash and never uploaded, since an upload is shared with every
 # VirusTotal customer. Scanning a URL would take a POST, so a URL VirusTotal hasn't seen
@@ -68,7 +68,7 @@ FACTS = {
 }
 
 # Domains whose reputation is already known, so they're looked up last
-KNOWN_DOMAINS = {domain for domains in BRANDS.values() for domain in domains} | FREE_EMAIL_DOMAINS
+KNOWN_DOMAINS = {domain for domains in (*BRANDS.values(), FREE_EMAIL_DOMAINS) for domain in domains}
 
 PICTURE_ENDINGS = (".png", ".jpg", ".jpeg", ".gif", ".bmp")
 

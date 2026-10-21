@@ -6,8 +6,8 @@ from pathlib import Path
 
 from .domains import (base_domain, decode_idn, is_ip, lookalike_forms, normalize_unicode,
                       registered_name, url_host)
-from .lists import ALLOWED_NAMES, BRANDS, EXECUTIVES, FREE_EMAIL_DOMAINS, JOIN_WORDS, OWN_DOMAINS, OWN_NAMES
 from .models import Address, Check, ParsedEmail, Result, Strength, for_each_from, join_first_five
+from .settings import ALLOWED_NAMES, BRANDS, EXECUTIVES, FREE_EMAIL_DOMAINS, JOIN_WORDS, OWN_DOMAINS, OWN_NAMES
 
 # Shorter brand names are one letter from ordinary words (apple: apply) and sit inside others
 # (pineapple), so an English word list decides what a typo or joined word means. They're
@@ -297,7 +297,7 @@ def _domain_words(domain: str, max_length: int) -> list[str]:
 @functools.cache
 def _name_forms(name: str) -> frozenset[str]:
     # A name's lookalike spellings. These and the patterns below are worked out once, since the
-    # names only come from lists.py and every domain in the email is compared with them. Doing
+    # names only come from settings.py and every domain in the email is compared with them. Doing
     # it for each domain took 14 seconds for 20,000.
     return frozenset(lookalike_forms(name))
 
