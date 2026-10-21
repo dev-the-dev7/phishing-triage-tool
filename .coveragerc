@@ -8,3 +8,5 @@ patch = subprocess
 
 [report]
 show_missing = true
+# Every line and branch is tested, so one that isn't fails the run, on CI too
+fail_under = 100

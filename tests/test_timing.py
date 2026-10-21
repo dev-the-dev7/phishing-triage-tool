@@ -1,6 +1,7 @@
 """Timing tests. The sender controls most of an email, and a crafted one can make slow code
 run for minutes, which stalls triage. Run the full sweep with: pytest -m slow"""
 
+import os
 import time
 
 import pytest
@@ -21,40 +22,45 @@ def seconds(task) -> float:
     return time.perf_counter() - start
 
 
+# A slower or busier machine, like a shared one running CI, slows a regression as much as the
+# code, so it can give every limit here more room: TIMING_SCALE=3 triples them
+SCALE = float(os.environ.get("TIMING_SCALE", "1"))
+LIMIT = 1 * SCALE
+
 # Input that made the tool take minutes while it was being built, or that could. The slowest
 # takes about half a second now, so a machine twice as slow would reach the one-second limit.
 
 def test_long_run_of_spaces_in_received():
     # \s+ next to .*? in the from ... by pattern tried every split of the spaces
     parsed = ParsedEmail(received=["from " + " " * 200_000 + "x"])
-    assert seconds(lambda: (find_origin(parsed), received_warnings(parsed))) < 1
+    assert seconds(lambda: (find_origin(parsed), received_warnings(parsed))) < LIMIT
 
 
 def test_many_dashes_in_a_link_host():
     # Every run of neighboring pieces is a word to compare, so runs longer than any brand
     # name are skipped
     parsed = ParsedEmail(links=[Link("https://" + "a-" * 5_000 + "a.com/", "")])
-    assert seconds(lambda: (check_lookalike(parsed), check_brand_joined(parsed))) < 1
+    assert seconds(lambda: (check_lookalike(parsed), check_brand_joined(parsed))) < LIMIT
 
 
 @pytest.mark.parametrize("unit", ["(", "(a", '"', '"\\', '\\"', '"('])
 def test_unclosed_comments_and_quotes_in_authentication_results(unit):
     parsed = ParsedEmail(auth_results=["mx.example.org; dkim=pass " + unit * 20_000])
-    assert seconds(lambda: (check_spf(parsed), check_dkim(parsed), check_dmarc(parsed))) < 1
+    assert seconds(lambda: (check_spf(parsed), check_dkim(parsed), check_dmarc(parsed))) < LIMIT
 
 
 def test_many_bases_and_links():
     # Every link is read against each <base>, so only the first MAX_BASES of them are used
     html = "".join(f'<base href="https://b{i}.example/">' for i in range(500)) + '<a href="/x">x</a>' * 500
     raw = ("From: a@example.org\r\nContent-Type: text/html\r\n\r\n" + html).encode()
-    assert seconds(lambda: run_checks(parse_bytes(raw))) < 1
+    assert seconds(lambda: run_checks(parse_bytes(raw))) < LIMIT
 
 
 def test_many_from_and_reply_to_addresses():
     # The Reply-To check compares each From with every Reply-To
     addresses = ", ".join(f"a{i}@e{i}.example" for i in range(1_000))
     parsed = parse_bytes(f"From: {addresses}\r\nReply-To: {addresses}\r\n\r\nx".encode())
-    assert seconds(lambda: run_checks(parsed)) < 1
+    assert seconds(lambda: run_checks(parsed)) < LIMIT
 
 
 def test_thousands_of_open_elements():
@@ -62,14 +68,14 @@ def test_thousands_of_open_elements():
     # element each time
     html = "<span>" * 10_000 + "<p>x<li>" * 10_000 + "</b>" * 10_000
     raw = ("From: a@example.org\r\nContent-Type: text/html\r\n\r\n" + html).encode()
-    assert seconds(lambda: run_checks(parse_bytes(raw))) < 1
+    assert seconds(lambda: run_checks(parse_bytes(raw))) < LIMIT
 
 
 def test_unclosed_outlook_parts():
     # Python reads an unclosed comment as running to the end, so an early version that read
     # each Outlook part again on its own read the rest of the email once per part
     raw = ("From: a@example.org\r\nContent-Type: text/html\r\n\r\n" + "<!--[if mso]>" * 150_000).encode()
-    assert seconds(lambda: parse_bytes(raw)) < 1
+    assert seconds(lambda: parse_bytes(raw)) < LIMIT
 
 
 def test_long_style_block_and_link_text():
@@ -77,13 +83,13 @@ def test_long_style_block_and_link_text():
     css = "<style>" + r".x::before{content:'\2e'}" * 10_000 + "content:" * 10_000 + "</style>"
     link = '<a href="https://evil.com/">' + "pay<b>pal</b>.com " * 10_000 + "</a>"
     raw = ("From: a@example.org\r\nContent-Type: text/html\r\n\r\n" + css + link).encode()
-    assert seconds(lambda: parse_bytes(raw)) < 1
+    assert seconds(lambda: parse_bytes(raw)) < LIMIT
 
 
 def test_long_run_of_spaces_in_alert_text():
     # Defanged brackets can have spaces in front (evil [.] com), and trying every space in the
     # run as the start was quadratic
-    assert seconds(lambda: from_text("a" + " " * 200_000 + "b")) < 1
+    assert seconds(lambda: from_text("a" + " " * 200_000 + "b")) < LIMIT
 
 
 @pytest.mark.parametrize("link", [
@@ -93,7 +99,7 @@ def test_long_run_of_spaces_in_alert_text():
     "https://urldefense.com/v3/__https://evil.com/" + "a*" * 100_000 + "__;" + "Kysr" * 33_334 + "!!x$",
 ], ids=["no end", "many marks"])
 def test_long_proofpoint_link(link):
-    assert seconds(lambda: unwrap(link)) < 1
+    assert seconds(lambda: unwrap(link)) < LIMIT
 
 
 def test_two_link_wrappers_nested_hundreds_deep():
@@ -102,7 +108,7 @@ def test_two_link_wrappers_nested_hundreds_deep():
     url = "https://evil.com/"
     for _ in range(600):
         url = "https://www.google.com/url?url=https://a.com/&q=" + url.replace("%", "%25").replace("&", "%26")
-    assert seconds(lambda: destinations(url)) < 1
+    assert seconds(lambda: destinations(url)) < LIMIT
 
 
 # The full sweep puts each pattern in every field the sender controls, at two sizes. Code
@@ -145,7 +151,7 @@ def test_time_grows_with_the_input(unit):
     small = seconds(lambda: triage(crafted_email(unit, 20_000)))
     large = seconds(lambda: triage(crafted_email(unit, 40_000)))
     # The added 0.1 seconds covers timer noise on the quick ones
-    assert large < 3 * small + 0.1
+    assert large < 3 * small + 0.1 * SCALE
 
 
 # Alert text goes through other patterns: defanged brackets, addresses, IPs and hashes
@@ -158,4 +164,4 @@ TEXT_UNITS = UNITS + [" ", "[", "[ ", " [.", "(dot", "hxx", "h**ps", "a@", "a@b"
 def test_alert_text_time_grows_with_the_input(unit):
     small = seconds(lambda: from_text((unit * 100_000)[:100_000]))
     large = seconds(lambda: from_text((unit * 200_000)[:200_000]))
-    assert large < 3 * small + 0.1
+    assert large < 3 * small + 0.1 * SCALE

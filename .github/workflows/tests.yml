@@ -1,0 +1,42 @@
+# Runs every test on Linux and Windows for each push to main and each pull request
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The token can only read the code
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      # One system failing doesn't cancel the other, so both results are seen
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    # A regression that makes a test run for minutes stops here, not after GitHub's six hours
+    timeout-minutes: 20
+    env:
+      # Shared runners are slower and busier than a desktop
+      TIMING_SCALE: 3
+    steps:
+      # Pinned to the commit, since a tag can be moved to other code
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # Keeps the token out of .git/config, where any later step could read it
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          # The version the tool is built and tested with
+          python-version: "3.14"
+      - run: python -m pip install -r requirements-dev.txt
+      # The timing tests run on their own, since measuring coverage slows the code down
+      - run: python -m coverage run -m pytest --ignore=tests/test_timing.py
+      - run: python -m coverage combine
+      - run: python -m coverage report
+      - run: python -m pytest tests/test_timing.py
+      - run: python -m pytest -m slow
