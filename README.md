@@ -3,9 +3,7 @@
 A Python CLI that gathers evidence for phishing triage from a reported email.
 The analyst makes the call.
 
-## Status
-
-Work in progress. What works now, with `python -m triage path/to/email.eml`:
+## What it does
 
 - Parsing the email: headers, addresses, text and HTML bodies, links, and attachment hashes
   (SHA-256, computed in memory)
@@ -36,25 +34,6 @@ Work in progress. What works now, with `python -m triage path/to/email.eml`:
   short summary. `-` prints one instead of writing a file, for a pipe, and the summary
   goes to stderr. There's a sample of each, from a synthetic email, in `samples/`.
 
-For example:
-
-```powershell
-# Real emails and alert text, and anything made from them, stay in data\, which git
-# ignores, since they hold personal data
-python -m triage data\reported.eml --out data\note.md --json data\report.json --enrich
-python -m triage --text data\alert.txt --enrich
-
-# The note on the clipboard, ready to paste. Windows PowerShell reads a program's output in
-# the console's old code page, which garbles letters like Cyrillic lookalikes, so set UTF-8
-# first.
-[Console]::OutputEncoding = [Text.Encoding]::UTF8
-python -m triage data\reported.eml --out - | Set-Clipboard
-```
-
-Planned:
-
-- `--expect` for the brand the reporter says the email claims to be from
-
 ## Installing
 
 The tool needs Python 3.14 or newer, and is tested with 3.14 on Windows and Linux. On an
@@ -79,6 +58,26 @@ On Linux, create the environment with `python3.14 -m venv .venv` and activate it
 writing domains as browsers do, and what `requests` installs, each pinned to one version
 so a new release isn't picked up without anyone looking at it. To run the tests too,
 install `requirements-dev.txt` instead, which adds pytest and coverage.
+
+## Running it
+
+With the environment active, from this folder:
+
+```powershell
+# The made-up email the tests use, to see what a report looks like
+python -m triage tests/fixtures/suspicious.eml
+
+# Real emails and alert text, and anything made from them, stay in data\, which git
+# ignores, since they hold personal data
+python -m triage data\reported.eml --out data\note.md --json data\report.json --enrich
+python -m triage --text data\alert.txt --enrich
+
+# The note on the clipboard, ready to paste. Windows PowerShell reads a program's output in
+# the console's old code page, which garbles letters like Cyrillic lookalikes, so set UTF-8
+# first.
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+python -m triage data\reported.eml --out - | Set-Clipboard
+```
 
 ## Setting up the lookups
 
@@ -258,10 +257,10 @@ be slow. The emails in `tests/fixtures/` are made up.
 - **The note is written for a ticket.** It follows the usual triage note: a summary, any
   patterns, the flags with their evidence, what was inconclusive or passed, the indicators,
   typical follow-ups worded as suggestions, and blank fields for the analyst's verdict and
-  actions, which the tool never fills in. Every value from the email or a lookup is in a code span
-  and defanged, so it can't make a link, an image, or formatting, whether the ticket
-  system reads Markdown or not. That includes the Message-ID and addresses, which have to
-  be refanged before searching for them.
+  actions, which the tool never fills in. Every value from the email or a lookup is in a
+  code span and defanged, so it can't make a link, an image, or formatting, whether the
+  ticket system reads Markdown or not. That includes the Message-ID and addresses, which
+  have to be refanged before searching for them.
 
 - **The JSON keeps values exactly as found**, since a tool that blocks or searches needs
   the real URL, with each indicator's defanged form next to it. It's plain ASCII: anything
@@ -510,6 +509,9 @@ be slow. The emails in `tests/fixtures/` are made up.
   The `xn--` form is written by the newer standard browsers follow (IDNA 2008), so
   `straße.de` is `xn--strae-oqa.de`. Python's own encoder, which turns it into
   `strasse.de`, a different domain, only writes what that standard refuses, like an emoji.
+  The checks treat both forms as one domain, so `müller.de` in `settings.py` and
+  `xn--mller-kva.de` in an email are the same, but their evidence shows a domain as the
+  email wrote it, so `xn--pypal-4ve.com` can't pass for paypal.com.
 
 - **The sender's domains and the origin are listed first**, since a long email can link to
   a dozen domains before them. An IP a check flags, like a faked Microsoft hop's, is listed
@@ -666,6 +668,15 @@ be slow. The emails in `tests/fixtures/` are made up.
   Authentication-Results (`header.d`, or `header.i` for Gmail). If it names none, DKIM
   shows inconclusive.
 
+- **An envelope address with an unquoted `;` can add a fake pass.** Providers copy the
+  sender's envelope address into Authentication-Results, and nothing there marks where it
+  ends, so in `x;dkim=pass.header.i=@paypal.com;@evil.com` the part between the `;`s reads
+  as a DKIM pass for paypal.com. A real DMARC fail still flags, and no pattern counts the
+  DKIM pass then. A From domain with no DMARC record has no fail to show, so the DKIM pass
+  counts, and so does a DMARC pass added the same way if your provider writes no DMARC
+  result. Such an address isn't valid, so this needs a provider that accepts it and copies
+  it unchanged.
+
 - **Help desk systems (Zendesk, Freshdesk) often set Reply-To to their own domain** so
   replies land in a ticket queue. That gets flagged the same way as a phishing Reply-To,
   and the analyst has to judge it.
@@ -820,3 +831,21 @@ be slow. The emails in `tests/fixtures/` are made up.
 - **Domain age needs `--enrich`, and only covers the domains that were looked up.** Some
   domains have no registration date in VirusTotal, and that check is then inconclusive. A
   phishing site on a hacked or long-held domain is old, so it passes.
+
+## Future work
+
+- A display name check on the Sender header, which Outlook shows as "Sender on behalf of
+  From", and an Ambiguous Sender check like Ambiguous From
+- Caveats that point out signs of a mailing list, like a DKIM signature from the Sender's
+  domain, since lists break DMARC on real mail. They'd add context, not change a result
+- An optional `--render` that hands the HTML to a headless browser with scripts off, in a
+  container with no network, and compares what it shows with the tool's reading, so what
+  CSS hides or adds becomes evidence instead of inconclusive
+- Links inside attachments, like a PDF's, read in the same kind of container
+- More lookup sources, still lookups only. With a third, `enrich.py` becomes a package
+- Feeding the JSON to a ticket system or SOAR playbook, so a reported email gets its
+  report without anyone running the tool
+- Your settings in a file outside the package, so updating the tool can't clash with your
+  changes, and your additions kept apart from the shipped lists
+- Lookups in parallel, since with a paid key a run can make hundreds, and one at a time
+  those can take minutes
