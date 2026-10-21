@@ -55,6 +55,31 @@ Planned:
 
 - `--expect` for the brand the reporter says the email claims to be from
 
+## Installing
+
+The tool needs Python 3.14 or newer, and is tested with 3.14 on Windows and Linux. On an
+older version it stops with an error, since its results can't be trusted there: on
+3.11.0, address headers can't be read, and the Reply-To check passes without one.
+
+It runs from this folder with `python -m triage`, without being installed as a package.
+To set it up in PowerShell:
+
+```powershell
+py -3.14 -m venv .venv
+# If PowerShell won't run scripts, allow them for this window only:
+# Set-ExecutionPolicy -Scope Process RemoteSigned
+.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+```
+
+On Linux, create the environment with `python3.14 -m venv .venv` and activate it with
+`source .venv/bin/activate`.
+
+`requirements.txt` holds what the tool needs: `requests` for the lookups and its own
+dependencies, each pinned to one version so a new release isn't picked up without anyone
+looking at it. To run the tests too, install `requirements-dev.txt` instead, which adds
+pytest and coverage.
+
 ## Setting up the lookups
 
 `--enrich` needs an API key from [VirusTotal](https://www.virustotal.com) and one from
@@ -114,6 +139,62 @@ python -m pytest tests/test_settings.py
 The full test suite checks the tool against the second part's lists as they ship, so after
 changing them some of its tests can fail without anything being wrong. The first and last
 parts don't affect it. `tests/test_settings.py` is the one that checks your changes.
+
+## Running the tests
+
+With `requirements-dev.txt` installed, from this folder:
+
+```powershell
+# Every test but the slow ones, in about 20 seconds
+python -m pytest
+# The timing sweep and a long run on damaged emails, in a minute or two
+python -m pytest -m slow
+# Which lines and branches the tests reach, leaving out the timing tests, since measuring
+# slows the code down. erase clears an earlier run's data, which report would add in, and
+# report fails below 100%.
+python -m coverage erase
+python -m coverage run -m pytest --ignore=tests/test_timing.py
+python -m coverage report
+```
+
+The timing tests run crafted input that made the tool take minutes while it was being
+built, or could. Each input must finish within a second, and in the slow sweep, doubling
+the input mustn't more than triple the time. On a slower or busier machine,
+`$env:TIMING_SCALE = 3` triples the one-second limit and the sweep's allowance for timer
+noise, as the GitHub Actions workflow does.
+
+Each test marked xfail is one of the Limitations below, written as what should happen. One
+that starts passing fails the run, until its mark and its README line are removed.
+
+## How the code is laid out
+
+`python -m triage` runs `triage/__main__.py`, which passes the email through each stage in
+turn: `parser.py` reads it, `received.py` finds its origin, `checks.py` runs the checks,
+`iocs.py` lists the indicators, `enrich.py` looks them up with `--enrich`, and `report.py`
+builds the report, which `__main__.py` prints or saves. Alert text from `--text` goes
+straight to the indicators.
+
+- `parser.py` reads a .eml file into a `ParsedEmail`: headers, addresses, bodies, links,
+  and attachment hashes. `html_reader.py` reads an HTML body the way a mail client shows
+  it, and `link_wrappers.py` reads the real link out of a rewritten one.
+- `checks.py` runs every check that needs only the email. They're in `headers.py` (SPF,
+  DKIM, DMARC, Ambiguous From, Reply-To, Return-Path, free webmail), `impersonation.py`
+  (posing as a brand, your organization, or an executive), `links.py` (where links go and
+  what they open), and `content.py` (hidden text, image-only emails, text added by CSS).
+- `enrich.py` looks the indicators up in VirusTotal and AbuseIPDB, with a cache and the
+  limits from `settings.py`, and holds the two checks that need the results: domain age
+  and faked Microsoft hops.
+- `report.py` builds one report and renders it for the terminal, as Markdown, and as JSON,
+  so the three can't disagree. `patterns.py` finds the patterns it shows.
+- `models.py` holds the dataclasses passed between the stages, and `domains.py` the
+  helpers for domains, hosts, and IPs, with the Public Suffix List in
+  `public_suffix_list.dat`. `update_suffixes.py` downloads a newer copy.
+- `settings.py` is what's yours to change, and `english_words.txt` is the word list short
+  brand names are checked against.
+
+The tests in `tests/` mostly have one file per module, plus `test_cli.py` for the command
+line, `test_robustness.py` for damaged emails, and `test_timing.py` for input crafted to
+be slow. The emails in `tests/fixtures/` are made up.
 
 ## Design decisions
 
