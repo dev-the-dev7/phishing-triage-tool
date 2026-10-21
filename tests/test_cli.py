@@ -2,6 +2,7 @@
 emails written to a temporary folder."""
 
 import contextlib
+import errno
 import io
 import json
 import os
@@ -279,6 +280,32 @@ def test_a_pipe_closed_early_ends_quietly(tmp_path):
     process.stdout.close()
     assert process.stderr.read() == b""
     assert process.wait() == 1
+
+
+@pytest.mark.parametrize("args", [["--out", "-"], []], ids=["note", "report"])
+def test_a_pipe_closed_before_anything_is_written_ends_quietly(args):
+    # The reader is gone before anything is written. Python would hold a report this small
+    # back until exit, and Windows says EINVAL for it, not a broken pipe. The note about an
+    # old suffix list can still come first.
+    process = subprocess.Popen([sys.executable, "-m", "triage", str(FIXTURES / "suspicious.eml"), *args],
+                               cwd=Path(__file__).parent.parent, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process.stdout.close()
+    err = process.stderr.read()
+    assert b"Error" not in err and b"Strongest flag" not in err
+    assert process.wait() == 1
+
+
+@pytest.mark.parametrize("code, raised", [(errno.EINVAL, BrokenPipeError), (errno.ENOSPC, OSError)],
+                         ids=["invalid", "disk full"])
+def test_only_invalid_is_read_as_a_closed_pipe(code, raised):
+    # How Windows says the reader was gone before the write. Any other error is a real one.
+    class Stream:
+        def write(self, text):
+            raise OSError(code, os.strerror(code))
+
+    with pytest.raises(OSError) as caught:
+        cli._print("x", Stream())
+    assert caught.type is raised
 
 
 def test_a_dash_and_a_file(capsys, tmp_path):

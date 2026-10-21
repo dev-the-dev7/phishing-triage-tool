@@ -2,6 +2,7 @@
 
 import argparse
 import codecs
+import errno
 import os
 import sys
 from datetime import date
@@ -177,7 +178,7 @@ def _send(report: Report, args: argparse.Namespace) -> int:
     written = []
     for name, render in outputs:
         if name == "-":
-            print(render(report), end="")
+            _print(render(report), sys.stdout)
             continue
         try:
             _write(Path(name), render(report))
@@ -185,12 +186,23 @@ def _send(report: Report, args: argparse.Namespace) -> int:
             # Printed in full, so a run that waited on lookups isn't lost
             also = f" ({written[0]} was written)" if written else ""
             print(f"error: couldn't write {name}: {e.strerror or e}{also}", file=sys.stderr)
-            print(render_text(report), end="", file=terminal)
+            _print(render_text(report), terminal)
             return 1
         written.append(name)
-    print(render_summary(report, written) if outputs else render_text(report), end="", file=terminal)
+    _print(render_summary(report, written) if outputs else render_text(report), terminal)
     _note_old_suffix_list()
     return 0
+
+
+def _print(text: str, stream) -> None:
+    # Sent in full now, so a reader that stopped early (| head) is found here and not when
+    # Python flushes at exit. Windows says EINVAL when the reader was gone before the write.
+    try:
+        print(text, end="", file=stream, flush=True)
+    except OSError as e:
+        if e.errno == errno.EINVAL:
+            raise BrokenPipeError(errno.EPIPE, "the program reading the output stopped") from e
+        raise
 
 
 def _write(path: Path, text: str) -> None:
