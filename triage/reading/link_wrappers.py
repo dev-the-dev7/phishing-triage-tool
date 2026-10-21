@@ -73,7 +73,7 @@ def _inner_links(url: str, redirects: bool) -> set[str]:
     elif host in PROOFPOINT and parts.path == "/v2/url":
         found = [unquote(value.translate(PROOFPOINT_V2)) for value in query.get("u", [])]
     elif host in PROOFPOINT and parts.path.startswith("/v3/__"):
-        found = [_proofpoint_v3(url)]
+        found = [_proofpoint_v3_link(url)]
     elif redirects and host in GOOGLE and parts.path == "/url":
         # q= is the link, except on a search result, where it's the search and url= is the link.
         # Google only sends on to web pages, so a search like site:example.com isn't a link.
@@ -86,7 +86,7 @@ def _inner_links(url: str, redirects: bool) -> set[str]:
     return {link for link in map(browser_url, found) if SCHEME.match(link)}
 
 
-def _proofpoint_v3(url: str) -> str:
+def _proofpoint_v3_link(url: str) -> str:
     # https://urldefense.com/v3/__https://example.com/a*b__;Kw!!...$ is https://example.com/a+b,
     # since Kw is base64 for +. Found with find(), not a regex, so thousands of /v3/__ stay quick.
     start = url.find("/v3/__") + len("/v3/__")

@@ -149,10 +149,10 @@ def url_host(url: str) -> str | None:
     if not name:
         return None
     host = normalize_unicode(unquote(name)).rstrip(".")
-    return browser_ipv4(host) or host or None
+    return _browser_ipv4(host) or host or None
 
 
-def browser_ipv4(host: str) -> str | None:
+def _browser_ipv4(host: str) -> str | None:
     # Browsers read a host ending in a number as IPv4, in forms ipaddress refuses:
     # http://3627734532/, http://0xd83ad604/ and http://0330.072.0326.04/ all go to
     # 216.58.214.4. The last part fills the bytes left (WHATWG URL standard).

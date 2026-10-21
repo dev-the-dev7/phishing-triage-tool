@@ -4,7 +4,7 @@ refang/defang."""
 import pytest
 
 from triage.models import Address, Attachment, Indicators, Link, Origin, ParsedEmail
-from triage.reading.iocs import defang, defang_text, from_email, from_text, refang
+from triage.reading.iocs import defang, defang_text, indicators_from_email, indicators_from_text, refang
 
 SHA256 = "043ea8960dc71f654cf0ac9ac501c16d09eed7b0e1528532fe25f122f1cc4f35"
 SHA1 = "a9993e364706816aba3e25717850c26c9cd0d89d"
@@ -72,7 +72,7 @@ MD5: {MD5}, SHA-1 {SHA1}
 
 
 def test_alert_text():
-    assert from_text(ALERT) == Indicators(
+    assert indicators_from_text(ALERT) == Indicators(
         urls=["https://login-paypa1.com/verify?id=1", "http://216.58.214.4/x"],
         domains=["login-paypa1.com", "paypa1.com", "evil.net"],
         ips=["216.58.214.4", "10.0.0.5", "198.51.100.7", "2001:db8::1"],
@@ -99,32 +99,33 @@ def test_alert_text():
     ("https://p\N{CYRILLIC SMALL LETTER A}ypal.com/x", "https://xn--pypal-4ve.com/x", "xn--pypal-4ve.com"),
 ])
 def test_urls_in_text(text, url, host):
-    found = from_text(text)
+    found = indicators_from_text(text)
     assert (found.urls, found.domains) == ([url], [host])
 
 
 def test_a_wrapped_link_in_alert_text_is_read_as_where_it_goes():
     # The reader's address in data= isn't listed
-    found = from_text("User clicked https://nam02.safelinks.protection.outlook.com/?url=https%3A%2F%2Fevil.com"
-                      "%2Flogin&data=05%7C02%7Cjordan.lee%40example.com%7C0&reserved=0 at 10:30")
+    found = indicators_from_text("User clicked https://nam02.safelinks.protection.outlook.com/?url=https%3A%2F%2F"
+                                 "evil.com%2Flogin&data=05%7C02%7Cjordan.lee%40example.com%7C0&reserved=0 at 10:30")
     assert (found.urls, found.domains, found.emails) == (["https://evil.com/login"], ["evil.com"], [])
 
 
 def test_both_links_a_wrapper_in_alert_text_names_are_listed():
-    found = from_text("User clicked https://www.google.com/url?q=https://www.paypal.com/&url=https://evil.com/")
+    found = indicators_from_text("User clicked https://www.google.com/url?q=https://www.paypal.com/"
+                                 "&url=https://evil.com/")
     assert (found.urls, found.domains) == (["https://evil.com/", "https://www.paypal.com/"],
                                            ["evil.com", "www.paypal.com"])
 
 
 def test_url_with_an_ip_host():
-    found = from_text("http://0xd83ad604/x and http://[2001:DB8::1]:8080/y")
+    found = indicators_from_text("http://0xd83ad604/x and http://[2001:DB8::1]:8080/y")
     assert (found.urls, found.ips) == (["http://216.58.214.4/x", "http://[2001:db8::1]:8080/y"],
                                        ["216.58.214.4", "2001:db8::1"])
 
 
 def test_text_in_a_url_isnt_read_on_its_own():
     # A file name or hash in a URL's path isn't a domain or a hash of its own
-    found = from_text(f"https://evil.com/files/report.zip?h={MD5}")
+    found = indicators_from_text(f"https://evil.com/files/report.zip?h={MD5}")
     assert (found.domains, found.hashes) == (["evil.com"], [])
 
 
@@ -136,7 +137,7 @@ def test_text_in_a_url_isnt_read_on_its_own():
     (r"Ran C:\setup.py and D:/tools/run.sh", []),
 ])
 def test_file_names_in_a_path_arent_domains(text, domains):
-    assert from_text(text).domains == domains
+    assert indicators_from_text(text).domains == domains
 
 
 @pytest.mark.parametrize("text", [
@@ -147,14 +148,14 @@ def test_file_names_in_a_path_arent_domains(text, domains):
     "4.3.2.1.b.a.9.8.7.6.5.0.4.0.0.0.3.0.0.0.2.0.0.0.1.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa",
 ])
 def test_numbers_that_arent_ips(text):
-    found = from_text(text)
+    found = indicators_from_text(text)
     # Not listed as a domain either
     assert found.ips == [] and not any(domain.replace(".", "").isdigit() for domain in found.domains)
 
 
 def test_ipv6_in_text():
     # Two colons are enough, and a full stop after an address ends the sentence
-    assert from_text("From fe80::1, then 2001:db8::5.").ips == ["fe80::1", "2001:db8::5"]
+    assert indicators_from_text("From fe80::1, then 2001:db8::5.").ips == ["fe80::1", "2001:db8::5"]
 
 
 @pytest.mark.parametrize("text, name, ip", [
@@ -163,43 +164,43 @@ def test_ipv6_in_text():
 ])
 def test_a_reverse_dns_name_gives_the_ip_it_asks_about(text, name, ip):
     # The IP is written backwards in the name, and the numbers as written are someone else's
-    found = from_text(text)
+    found = indicators_from_text(text)
     assert (found.domains, found.ips) == ([name], [ip])
 
 
 def test_ips_are_listed_in_the_order_written():
-    found = from_text("10.0.0.5 asked 156.32.33.45.in-addr.arpa, then 10.0.0.9")
+    found = indicators_from_text("10.0.0.5 asked 156.32.33.45.in-addr.arpa, then 10.0.0.9")
     assert found.ips == ["10.0.0.5", "45.33.32.156", "10.0.0.9"]
 
 
 @pytest.mark.parametrize("text", [MD5 + "0", "g" + MD5[1:], MD5[1:]])
 def test_hex_that_isnt_a_hash(text):
-    assert from_text(text).hashes == []
+    assert indicators_from_text(text).hashes == []
 
 
 def test_a_hash_given_twice_is_listed_once():
     # In either case, since alerts write hashes both ways
-    assert from_text(f"{MD5} and {MD5.upper()}").hashes == [MD5]
+    assert indicators_from_text(f"{MD5} and {MD5.upper()}").hashes == [MD5]
 
 
 def test_addresses_ignore_case():
     # And are read whole, with plus addressing and a longer domain
-    found = from_text("Billing+x@Mail.PayPa1.co.uk wrote to billing+x@mail.paypa1.co.uk")
+    found = indicators_from_text("Billing+x@Mail.PayPa1.co.uk wrote to billing+x@mail.paypa1.co.uk")
     assert (found.emails, found.domains) == (["billing+x@mail.paypa1.co.uk"], ["mail.paypa1.co.uk"])
 
 
 def test_an_address_isnt_read_for_domains_too():
     # Its local part can look like a domain, here the real brand's, and isn't one
-    assert from_text("From: service.paypal.com@evil.com").domains == ["evil.com"]
+    assert indicators_from_text("From: service.paypal.com@evil.com").domains == ["evil.com"]
 
 
 def test_nothing_found():
-    assert from_text("No indicators here, see you at 10:30.") == Indicators()
+    assert indicators_from_text("No indicators here, see you at 10:30.") == Indicators()
 
 
 @pytest.mark.parametrize("text", ["Thanks.Regards", "invoice.pdf", "srv01.corp.local"])
 def test_endings_that_arent_tlds_arent_domains(text):
-    assert from_text(text).domains == []
+    assert indicators_from_text(text).domains == []
 
 
 def email(**fields) -> ParsedEmail:
@@ -220,7 +221,7 @@ def test_email_indicators():
         other_urls=["http://3627734532/p.gif"],
         attachments=[Attachment("invoice.pdf", "application/pdf", 5, SHA256)],
     )
-    assert from_email(parsed, Origin("203.0.113.5", "mail.paypa1.com", "mx.example.net")) == Indicators(
+    assert indicators_from_email(parsed, Origin("203.0.113.5", "mail.paypa1.com", "mx.example.net")) == Indicators(
         # Links are written the way the browser reads them
         urls=["https://evil.com/a", "https://evil.com/@paypal.com", "http://www.evil.net/b",
               "http://216.58.214.4/p.gif"],
@@ -241,7 +242,7 @@ def test_email_indicators():
     {"links": [Link("javascript:alert(1)", "x"), Link("/login", "x"), Link("", "x")]},
 ])
 def test_what_an_email_only_mentions_isnt_listed(fields):
-    found = from_email(email(**fields), None)
+    found = indicators_from_email(email(**fields), None)
     assert "paypal.com" not in found.domains and "evil.com" not in found.domains
     assert found.ips == []
     assert found.emails == ["service@paypa1.com"]
@@ -249,22 +250,22 @@ def test_what_an_email_only_mentions_isnt_listed(fields):
 
 def test_mailto_links_in_capitals_and_encoded():
     # Mail clients read the scheme in any case and %40 as @
-    found = from_email(email(links=[Link("MAILTO:help%40evil.org", "Help")]), None)
+    found = indicators_from_email(email(links=[Link("MAILTO:help%40evil.org", "Help")]), None)
     assert found.emails == ["service@paypa1.com", "help@evil.org"]
 
 
 def test_domains_are_in_the_form_dns_uses():
     parsed = email(links=[Link("https://p\N{CYRILLIC SMALL LETTER A}ypal.com/", "")])
-    assert from_email(parsed, None).domains == ["paypa1.com", "xn--pypal-4ve.com"]
+    assert indicators_from_email(parsed, None).domains == ["paypa1.com", "xn--pypal-4ve.com"]
     # A dot at the end is the same domain
     parsed = ParsedEmail(from_addrs=[Address("", "a@evil.com.", "evil.com.")], links=[Link("https://evil.com/", "")])
-    assert from_email(parsed, None).domains == ["evil.com"]
+    assert indicators_from_email(parsed, None).domains == ["evil.com"]
 
 
 def test_origin_inside_the_provider_has_no_ip():
-    assert from_email(email(), Origin(None, None, "mx.google.com")).ips == []
+    assert indicators_from_email(email(), Origin(None, None, "mx.google.com")).ips == []
 
 
 def test_sender_without_a_domain():
     parsed = ParsedEmail(from_addrs=[Address("", "undisclosed", "")])
-    assert from_email(parsed, None) == Indicators(emails=["undisclosed"])
+    assert indicators_from_email(parsed, None) == Indicators(emails=["undisclosed"])

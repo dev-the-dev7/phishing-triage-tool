@@ -45,7 +45,7 @@ def defang_text(text: str) -> str:
     return re.sub(r"(?<=[\w.!#$%&'*+/=?^`{|}~-])@(?=[\w-])", "[@]", text)
 
 
-def from_email(parsed: ParsedEmail, origin: Origin | None) -> Indicators:
+def indicators_from_email(parsed: ParsedEmail, origin: Origin | None) -> Indicators:
     # What the email links to, loads and came from. Domains only mentioned in the text aren't
     # listed, since phishing names the real brand to look genuine, and neither is a link's text.
     urls, hosts, emails = [], [], []
@@ -65,7 +65,7 @@ def from_email(parsed: ParsedEmail, origin: Origin | None) -> Indicators:
     return _indicators(urls, hosts, emails, [attachment.sha256 for attachment in parsed.attachments])
 
 
-def from_text(text: str) -> Indicators:
+def indicators_from_text(text: str) -> Indicators:
     # Bare domains, IPs and hashes count, since alerts list them that way. URLs and addresses
     # are taken out first, so a file name in a URL's path isn't read as a domain.
     text = refang(text)

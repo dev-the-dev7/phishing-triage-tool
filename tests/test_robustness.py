@@ -10,7 +10,7 @@ import pytest
 
 from triage.checks import run_checks
 from triage.checks.headers import MAX_FROMS
-from triage.reading.iocs import from_email, from_text
+from triage.reading.iocs import indicators_from_email, indicators_from_text
 from triage.reading.origin import find_origin, received_warnings
 from triage.reading.parser import parse_bytes
 from triage.report import build_report, build_text_report, render_json, render_markdown, render_summary, render_text
@@ -22,14 +22,14 @@ HEADERS = b"From: a@example.org\r\nTo: b@example.net\r\nSubject: s\r\n"
 def triage(raw: bytes) -> None:
     # Up to the report in every format, which is where text from the email ends up. The bytes are
     # read as alert text too, since alerts quote the email they came from.
-    reports = [build_text_report(from_text(raw.decode("utf-8-sig", errors="replace")), {})]
+    reports = [build_text_report(indicators_from_text(raw.decode("utf-8-sig", errors="replace")), {})]
     try:
         parsed = parse_bytes(raw)
     except ValueError:
         pass  # shown as a clean error
     else:
         origin = find_origin(parsed)
-        reports.append(build_report(parsed, origin, run_checks(parsed), from_email(parsed, origin), {},
+        reports.append(build_report(parsed, origin, run_checks(parsed), indicators_from_email(parsed, origin), {},
                                     parsed.parse_warnings + received_warnings(parsed)))
     for report in reports:
         # Anything outside ASCII, control characters included, is written as an escape code

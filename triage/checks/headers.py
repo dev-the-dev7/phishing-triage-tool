@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import replace
 
 from ..domains import base_domain, decode_idn, decoded_base
-from ..models import Address, Check, ParsedEmail, Result, Strength, encoded_addresses, join_first_five
+from ..models import Address, Check, ParsedEmail, Result, Strength, describe_encoded_addresses, join_first_five
 from ..settings import FREE_EMAIL_DOMAINS, TRUSTED_AUTHSERV_IDS
 
 
@@ -247,7 +247,7 @@ def check_ambiguous_from(parsed: ParsedEmail) -> list[Check]:
         found.append(f"{count}{listed}{no_sender}. Mail clients and DMARC checks don't always use the same one")
     encoded = [a for a in parsed.from_addrs if a.decoded]
     if encoded:
-        found.append(encoded_addresses(encoded))
+        found.append(describe_encoded_addresses(encoded))
     if not found:
         return []
     return [Check("Ambiguous From", Result.FLAG, Strength.VERY_STRONG, ". ".join(found))]
@@ -264,7 +264,7 @@ def _check_reply_to(parsed: ParsedEmail, from_addr: Address | None) -> Check:
         caveats.append(f"The email has {parsed.reply_to_headers} Reply-To headers, where one is allowed. Which "
                        "one a mail client uses isn't defined, so the addresses in all of them were checked.")
     encoded = [a for a in parsed.reply_to if a.decoded]
-    noted = [f"{encoded_addresses(encoded)}."] if encoded else []
+    noted = [f"{describe_encoded_addresses(encoded)}."] if encoded else []
     if not parsed.reply_to:
         return Check(name, Result.PASS, strength, "No Reply-To, replies go to the sender", caveats)
     if not from_addr or not from_addr.domain:
@@ -272,7 +272,7 @@ def _check_reply_to(parsed: ParsedEmail, from_addr: Address | None) -> Check:
                      caveats + noted)
 
     # On free webmail everyone shares the domain, so compare the whole address instead
-    if _free_webmail(from_addr.domain):
+    if _is_free_webmail(from_addr.domain):
         expected = from_addr.email.lower()
         mismatches = [a.email for a in parsed.reply_to if a.email.lower() != expected]
     else:
@@ -286,7 +286,8 @@ def _check_reply_to(parsed: ParsedEmail, from_addr: Address | None) -> Check:
     # A client that decodes the address may reply to what it shows
     if encoded:
         return Check(name, Result.INCONCLUSIVE, strength,
-                     f"Reply-To matches the sender ({expected}) as written. {encoded_addresses(encoded)}", caveats)
+                     f"Reply-To matches the sender ({expected}) as written. {describe_encoded_addresses(encoded)}",
+                     caveats)
     return Check(name, Result.PASS, strength, f"Reply-To matches the sender ({expected})", caveats)
 
 
@@ -326,11 +327,11 @@ def _check_free_email(from_addr: Address | None) -> Check:
     if not from_addr or not from_addr.domain:
         return Check(name, Result.INCONCLUSIVE, strength, "No readable From domain")
     base = base_domain(from_addr.domain)
-    if _free_webmail(base):
+    if _is_free_webmail(base):
         return Check(name, Result.FLAG, strength, f"Sent from a free {base} account, which anyone can create")
     return Check(name, Result.PASS, strength, f"{base} isn't on the free webmail list")
 
 
-def _free_webmail(domain: str) -> bool:
+def _is_free_webmail(domain: str) -> bool:
     # Decoded like the email's domain, so the list can write a provider either way
     return decoded_base(domain) in {decode_idn(d) for d in FREE_EMAIL_DOMAINS}

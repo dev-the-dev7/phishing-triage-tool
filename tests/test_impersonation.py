@@ -4,7 +4,7 @@ display names."""
 import pytest
 
 from triage.checks import impersonation
-from triage.checks.impersonation import (LONG_NAME_LENGTH, MIN_NAME_LENGTH, _english_words, _one_typo_apart,
+from triage.checks.impersonation import (LONG_NAME_LENGTH, MIN_NAME_LENGTH, _english_words, _is_one_typo_apart,
                                          check_brand_joined, check_display_name, check_lookalike)
 from triage.models import Address, Link, ParsedEmail, Result
 from triage.settings import BRANDS
@@ -35,8 +35,8 @@ def known_limitation(*values, reason: str):
     ("paypal", "payp", False),
 ])
 def test_one_typo_apart(a, b, expected):
-    assert _one_typo_apart(a, b) == expected
-    assert _one_typo_apart(b, a) == expected
+    assert _is_one_typo_apart(a, b) == expected
+    assert _is_one_typo_apart(b, a) == expected
 
 
 LOOKALIKE_DOMAINS = [
@@ -111,7 +111,7 @@ def test_lookalike_domain_flags(domain, real_domain):
     assert f"isn't {real_domain}" in check.evidence
 
 
-def _one_letter_typos(name: str) -> set[str]:
+def one_letter_typos(name: str) -> set[str]:
     typos = set()
     for i in range(len(name)):
         typos.add(name[:i] + name[i + 1:])
@@ -126,7 +126,7 @@ def _one_letter_typos(name: str) -> set[str]:
 @pytest.mark.parametrize("domain", sorted({
     f"{typo}.com"
     for brand in BRANDS if len(brand.replace(" ", "")) >= MIN_NAME_LENGTH
-    for typo in _one_letter_typos(brand.replace(" ", ""))
+    for typo in one_letter_typos(brand.replace(" ", ""))
     if len(brand.replace(" ", "")) >= LONG_NAME_LENGTH or typo not in _english_words()
 }))
 def test_every_dropped_doubled_or_swapped_letter_flags(domain):

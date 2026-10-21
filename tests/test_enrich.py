@@ -722,12 +722,12 @@ def test_a_second_ctrl_c_stops_and_keeps_what_was_found(server, keys, monkeypatc
     monkeypatch.setattr(clock, "sleep", ctrl_c)
     look_up_one = enrich._look_up_one
 
-    def again_once_stopped(service, *args):
+    def second_ctrl_c(service, *args):
         if service.stopped:
             raise KeyboardInterrupt
         return look_up_one(service, *args)
 
-    monkeypatch.setattr(enrich, "_look_up_one", again_once_stopped)
+    monkeypatch.setattr(enrich, "_look_up_one", second_ctrl_c)
     with pytest.raises(KeyboardInterrupt):
         look_up(Indicators(domains=FIVE_SITES))
     assert len(json.loads(enrich.CACHE_FILE.read_text(encoding="utf-8"))["lookups"]) == 4

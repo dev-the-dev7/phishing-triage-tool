@@ -124,7 +124,7 @@ class _HTMLCollector(HTMLParser):
                             if name in URL_ATTRIBUTES and value and value.strip(C0_OR_SPACE)]
         if tag == "a":
             # If the previous <a> was never closed, end it before starting this one
-            self._finish()
+            self._finish_link()
             # An empty href is still a link, to the page or its <base>
             if href is not None:
                 self._href = href
@@ -158,7 +158,7 @@ class _HTMLCollector(HTMLParser):
         # Browsers ignore the / in <span hidden/> and leave the element open, so the text after
         # it is hidden. Inside <svg> or <math>, <g/> is closed.
         self.handle_starttag(tag, attrs)
-        if self._last_open({"svg", "math"}) >= 0:
+        if self._last_open_index({"svg", "math"}) >= 0:
             self.handle_endtag(tag)
 
     def handle_endtag(self, tag):
@@ -166,7 +166,7 @@ class _HTMLCollector(HTMLParser):
         if tag == self._unshown:
             self._unshown = None
         if tag == "a":
-            self._finish()
+            self._finish_link()
         elif self._href is not None and tag not in UNMARKED:
             self._marked.append(TAG_MARK)
         # An end tag closes its element and any left open inside it. One with nothing to close is skipped.
@@ -180,7 +180,7 @@ class _HTMLCollector(HTMLParser):
 
     def close(self):
         super().close()
-        self._finish()  # catches an <a> that was never closed
+        self._finish_link()  # catches an <a> that was never closed
 
     def _break(self, gone):
         # A new line, and a space in a link's text, so example.com<br>Sign in isn't read as
@@ -194,11 +194,11 @@ class _HTMLCollector(HTMLParser):
             if not gone:
                 self._text.append(" ")
 
-    def _finish(self):
+    def _finish_link(self):
         if self._href is not None:
             self.links.append(Link(self._href, _collapse_whitespace("".join(self._text)),
                                    _collapse_whitespace("".join(self._full_text)),
-                                   _split_by_tags("".join(self._marked))))
+                                   _domains_split_by_tags("".join(self._marked))))
         self._href = None
 
     def _context(self, moved: bool) -> tuple[bool, bool, bool]:
@@ -220,11 +220,11 @@ class _HTMLCollector(HTMLParser):
 
     def _close_last(self, tags, limits):
         # Closes the last open element in tags, unless one in limits was opened inside it
-        index = self._last_open(tags)
-        if index > self._last_open(limits):
+        index = self._last_open_index(tags)
+        if index > self._last_open_index(limits):
             self._close_from(index)
 
-    def _last_open(self, tags) -> int:
+    def _last_open_index(self, tags) -> int:
         return max((self._positions[tag][-1] for tag in tags if self._positions.get(tag)), default=-1)
 
     def _close_from(self, index):
@@ -313,7 +313,7 @@ def _collect(html: str, warnings) -> ParsedHTML:
     except Exception as e:
         # HTMLParser no longer raises on broken markup, but a bug here still could. What was
         # found before it is kept.
-        collector._finish()
+        collector._finish_link()
         warnings.append(f"HTML body couldn't be fully parsed ({type(e).__name__}), links after that point may "
                         "be missing")
 
@@ -335,7 +335,7 @@ def _collect(html: str, warnings) -> ParsedHTML:
     )
 
 
-def _split_by_tags(marked: str) -> list[str]:
+def _domains_split_by_tags(marked: str) -> list[str]:
     # Domains split by a tag in a link's text, like pay<b>pal</b>.com, where CSS could hide or
     # add text. Tags holding only spaces or punctuation are also dropped, since hiding one is
     # how a domain gets split. The text is read with its line breaks and without, since CSS can

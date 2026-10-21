@@ -2,7 +2,7 @@
 
 import pytest
 
-from triage.models import Address, Check, encoded_addresses, join_first_five
+from triage.models import Address, Check, describe_encoded_addresses, join_first_five
 
 
 def test_check_refuses_a_typo():
@@ -23,10 +23,10 @@ def test_join_first_five(count, expected):
 
 def test_encoded_addresses_are_one_sentence():
     addresses = [Address("", f"=?q?{n}?=@evil.com", "evil.com", f"{n}@paypal.com") for n in range(7)]
-    assert encoded_addresses(addresses[:1], "To") == (
+    assert describe_encoded_addresses(addresses[:1], "To") == (
         "To address =?q?0?=@evil.com has encoded text in it, which isn't allowed in an address. Some mail clients "
         "decode it and show 0@paypal.com")
-    assert encoded_addresses(addresses) == (
+    assert describe_encoded_addresses(addresses) == (
         "7 addresses have encoded text in them, which isn't allowed in an address. Some mail clients decode them and "
         "show 0@paypal.com for =?q?0?=@evil.com; 1@paypal.com for =?q?1?=@evil.com; 2@paypal.com for "
         "=?q?2?=@evil.com; 3@paypal.com for =?q?3?=@evil.com; 4@paypal.com for =?q?4?=@evil.com (and 2 more)")

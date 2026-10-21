@@ -9,7 +9,7 @@ from triage.checks.impersonation import check_lookalike
 from triage.checks.links import check_google_redirect, check_link_mismatch, check_link_type
 from triage.models import Check, Link, ParsedEmail, Result
 from triage.reading import html_reader
-from triage.reading.iocs import from_email
+from triage.reading.iocs import indicators_from_email
 from triage.reading.parser import parse_bytes
 
 HEADERS = "From: a@example.org\r\nTo: someone@example.net\r\nSubject: s\r\n"
@@ -295,7 +295,7 @@ def test_a_wrapper_naming_two_links_is_a_link_to_each():
                                 ("https://www.paypal.com/", "www.paypal.com")]
     assert check_link_mismatch(parsed).evidence == "text shows www.paypal.com but goes to paypa1.com"
     assert check_lookalike(parsed).result == Result.FLAG
-    assert from_email(parsed, None).urls == ["https://paypa1.com/", "https://www.paypal.com/"]
+    assert indicators_from_email(parsed, None).urls == ["https://paypa1.com/", "https://www.paypal.com/"]
 
 
 def test_a_wrapper_naming_two_links_warns():

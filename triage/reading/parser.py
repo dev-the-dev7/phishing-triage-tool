@@ -10,7 +10,7 @@ from .html_reader import read_html
 from .iocs import defang
 from .link_wrappers import destinations, through_google
 from ..domains import urls_in_text
-from ..models import Address, Attachment, Link, ParsedEmail, encoded_addresses, join_first_five
+from ..models import Address, Attachment, Link, ParsedEmail, describe_encoded_addresses, join_first_five
 
 # Microsoft 365's largest allowed message. A bigger file isn't a real email, and the
 # email library needs several times the file's size in memory.
@@ -78,7 +78,7 @@ def _parse_message(raw: bytes) -> ParsedEmail:
     for name, found in (("Sender", sender), ("Return-Path", return_path), ("To", to)):
         encoded = [address for address in found if address.decoded]
         if encoded:
-            warnings.append(encoded_addresses(encoded, name))
+            warnings.append(describe_encoded_addresses(encoded, name))
     text_body = "\n".join(_shown_texts(msg, "plain", warnings))
     html_parts = _shown_texts(msg, "html", warnings)
     collected = [read_html(html, warnings) for html in html_parts]

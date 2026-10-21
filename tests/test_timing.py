@@ -10,7 +10,7 @@ from triage.checks import run_checks
 from triage.checks.headers import check_dkim, check_dmarc, check_spf
 from triage.checks.impersonation import check_brand_joined, check_lookalike
 from triage.models import Link, ParsedEmail
-from triage.reading.iocs import from_email, from_text
+from triage.reading.iocs import indicators_from_email, indicators_from_text
 from triage.reading.link_wrappers import destinations, unwrap
 from triage.reading.origin import find_origin, received_warnings
 from triage.reading.parser import parse_bytes
@@ -89,7 +89,7 @@ def test_long_style_block_and_link_text():
 def test_long_run_of_spaces_in_alert_text():
     # Defanged brackets can have spaces in front (evil [.] com), and trying every space in the
     # run as the start was quadratic
-    assert seconds(lambda: from_text("a" + " " * 200_000 + "b")) < LIMIT
+    assert seconds(lambda: indicators_from_text("a" + " " * 200_000 + "b")) < LIMIT
 
 
 @pytest.mark.parametrize("link", [
@@ -141,7 +141,7 @@ def crafted_email(unit: str, length: int) -> bytes:
 def triage(raw: bytes) -> None:
     parsed = parse_bytes(raw)
     run_checks(parsed)
-    from_email(parsed, find_origin(parsed))
+    indicators_from_email(parsed, find_origin(parsed))
     received_warnings(parsed)
 
 
@@ -162,6 +162,6 @@ TEXT_UNITS = UNITS + [" ", "[", "[ ", " [.", "(dot", "hxx", "h**ps", "a@", "a@b"
 @pytest.mark.slow
 @pytest.mark.parametrize("unit", TEXT_UNITS)
 def test_alert_text_time_grows_with_the_input(unit):
-    small = seconds(lambda: from_text((unit * 100_000)[:100_000]))
-    large = seconds(lambda: from_text((unit * 200_000)[:200_000]))
+    small = seconds(lambda: indicators_from_text((unit * 100_000)[:100_000]))
+    large = seconds(lambda: indicators_from_text((unit * 200_000)[:200_000]))
     assert large < 3 * small + 0.1 * SCALE

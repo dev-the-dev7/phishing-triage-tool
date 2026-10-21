@@ -14,26 +14,26 @@ LOOKALIKE_LINK = [Link("https://paypa1.com/", "")]
 WEBMAIL = Check("Free webmail sender", "flag", "weak", "")
 
 
-def found(checks, **fields) -> list[tuple[str, list[str]]]:
+def patterns_found(checks, **fields) -> list[tuple[str, list[str]]]:
     parsed = ParsedEmail(**{"from_addrs": ORG, **fields})
     return [(pattern.name, pattern.found) for pattern in find_patterns(parsed, checks)]
 
 
 def test_a_lookalike_that_passes_authentication():
     dkim = Check("DKIM", "pass", "medium", "")
-    assert found([DMARC_PASS, dkim, LOOKALIKE], from_addrs=LOOKALIKE_FROM) == [
+    assert patterns_found([DMARC_PASS, dkim, LOOKALIKE], from_addrs=LOOKALIKE_FROM) == [
         ("Lookalike that passes authentication", ["DMARC", "DKIM", "Lookalike domain"])]
-    assert found([Check("DMARC", "flag", "strong", ""), LOOKALIKE], from_addrs=LOOKALIKE_FROM) == []
+    assert patterns_found([Check("DMARC", "flag", "strong", ""), LOOKALIKE], from_addrs=LOOKALIKE_FROM) == []
 
 
 def test_a_dkim_pass_doesnt_count_once_dmarc_fails():
     # An envelope address with an unquoted ; can add a DKIM pass to your provider's header
     dkim = Check("DKIM", "pass", "medium", "")
     dmarc_fail = Check("DMARC", "flag", "strong", "")
-    assert found([dmarc_fail, dkim, LOOKALIKE], links=LOOKALIKE_LINK) == []
-    assert found([dmarc_fail, dkim, LOOKALIKE], from_addrs=LOOKALIKE_FROM) == []
+    assert patterns_found([dmarc_fail, dkim, LOOKALIKE], links=LOOKALIKE_LINK) == []
+    assert patterns_found([dmarc_fail, dkim, LOOKALIKE], from_addrs=LOOKALIKE_FROM) == []
     # A domain with no DMARC record has only DKIM to go by
-    assert found([Check("DMARC", "inconclusive", "strong", ""), dkim, LOOKALIKE], links=LOOKALIKE_LINK) == [
+    assert patterns_found([Check("DMARC", "inconclusive", "strong", ""), dkim, LOOKALIKE], links=LOOKALIKE_LINK) == [
         ("Authenticated sender with a lookalike link", ["DKIM", "Lookalike domain"])]
 
 
@@ -48,16 +48,16 @@ def test_a_unicode_lookalike_is_matched_as_the_reader_sees_it():
 
 
 def test_an_authenticated_sender_with_a_lookalike_link():
-    assert found([DMARC_PASS, LOOKALIKE], links=LOOKALIKE_LINK) == [
+    assert patterns_found([DMARC_PASS, LOOKALIKE], links=LOOKALIKE_LINK) == [
         ("Authenticated sender with a lookalike link", ["DMARC", "Lookalike domain"])]
-    assert found([LOOKALIKE], links=LOOKALIKE_LINK) == []
+    assert patterns_found([LOOKALIKE], links=LOOKALIKE_LINK) == []
     # The lookalike is only in the Reply-To
-    assert found([DMARC_PASS, LOOKALIKE], reply_to=LOOKALIKE_FROM) == []
+    assert patterns_found([DMARC_PASS, LOOKALIKE], reply_to=LOOKALIKE_FROM) == []
     # Anyone can make a webmail account to send from
-    assert found([DMARC_PASS, LOOKALIKE, WEBMAIL], links=LOOKALIKE_LINK) == []
+    assert patterns_found([DMARC_PASS, LOOKALIKE, WEBMAIL], links=LOOKALIKE_LINK) == []
     # Ordinary mail trips these, with click tracking and a template's javascript:void(0)
-    assert found([DMARC_PASS, Check("Link text vs destination", "flag", "strong", ""),
-                  Check("Script, file or app link", "flag", "medium", "")]) == []
+    assert patterns_found([DMARC_PASS, Check("Link text vs destination", "flag", "strong", ""),
+                           Check("Script, file or app link", "flag", "medium", "")]) == []
 
 
 def patterns_in(from_domain: str, html: str) -> list[str]:

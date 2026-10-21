@@ -17,7 +17,7 @@ from urllib.parse import quote, unquote
 import requests
 
 from .domains import TLDS, ascii_domain, base_domain, decode_idn, hosting_service, is_ip, url_host
-from .models import Attachment, Indicators, LookupStatus, Origin, Reputation, count
+from .models import Attachment, Indicators, LookupStatus, Origin, Reputation, pluralize
 from .reading.iocs import EMAIL
 from .settings import (ABUSEIPDB_LOOKUPS_PER_RUN, BRANDS, FREE_EMAIL_DOMAINS, OWN_DOMAINS, VT_LOOKUPS_PER_MINUTE,
                        VT_LOOKUPS_PER_RUN)
@@ -181,8 +181,8 @@ def _look_up_one(service: _Service, kind: str, value: str, cache: dict) -> Reput
     if reason:
         return Reputation(service.name, LookupStatus.SKIPPED, f"skipped, {reason}")
     cache_key = _cache_key(service.name, kind, value)
-    if cache_key in cache and _valid(service.name, cache[cache_key]["facts"]):
-        return _found(service.name, cache[cache_key]["facts"])
+    if cache_key in cache and _is_valid(service.name, cache[cache_key]["facts"]):
+        return _found_reputation(service.name, cache[cache_key]["facts"])
     if not service.key:
         return Reputation(service.name, LookupStatus.UNAVAILABLE, f"unavailable, {service.key_variable} isn't set",
                           for_the_run=True)
@@ -199,9 +199,9 @@ def _look_up_one(service: _Service, kind: str, value: str, cache: dict) -> Reput
         return Reputation(service.name, LookupStatus.UNAVAILABLE, f"unavailable, {e}", for_the_run=e.stop)
     if facts is None:
         return Reputation(service.name, LookupStatus.NOT_FOUND, "not found (unknown, not clean)")
-    if service.name != "VirusTotal" or _engines(facts):
+    if service.name != "VirusTotal" or _engine_count(facts):
         cache[cache_key] = {"saved": time.time(), "facts": facts}
-    return _found(service.name, facts)
+    return _found_reputation(service.name, facts)
 
 
 def not_sent_because(kind: str, value: str) -> str:
@@ -272,7 +272,7 @@ def _ask(service: _Service, kind: str, value: str) -> dict | None:
         facts = read(answer)
     except (AttributeError, KeyError, TypeError, ValueError, OverflowError, OSError):
         facts = None
-    if not _valid(service.name, facts):
+    if not _is_valid(service.name, facts):
         raise _NoAnswer("its answer couldn't be read")
     return facts
 
@@ -332,7 +332,7 @@ def _wait_for_turn(service: _Service) -> None:
     if service.per_minute and len(service.sent) >= service.per_minute:
         wait = service.sent[-service.per_minute] + LIMIT_MINUTE - time.monotonic()
         if wait > 0:
-            print(f"Waiting {count(math.ceil(wait), 'second')} for {service.name}'s limit of "
+            print(f"Waiting {pluralize(math.ceil(wait), 'second')} for {service.name}'s limit of "
                   f"{service.per_minute} lookups a minute (Ctrl+C skips the rest of the lookups)", file=sys.stderr)
             time.sleep(wait)
 
@@ -372,7 +372,7 @@ def _abuseipdb_facts(answer) -> dict:
             "domain": (data.get("domain") or "").strip().lower()}
 
 
-def _valid(service: str, facts) -> bool:
+def _is_valid(service: str, facts) -> bool:
     # Every fact there, of the right type, and counts from 0 to under a billion, since huge
     # ones can add up to a number too long to print. type(), since isinstance() would let
     # True pass as 1.
@@ -382,7 +382,7 @@ def _valid(service: str, facts) -> bool:
                     for name, kind in types.items()))
 
 
-def _found(service: str, facts: dict) -> Reputation:
+def _found_reputation(service: str, facts: dict) -> Reputation:
     if service == "VirusTotal":
         text = _describe_virustotal(facts)
     else:
@@ -390,16 +390,16 @@ def _found(service: str, facts: dict) -> Reputation:
     return Reputation(service, LookupStatus.FOUND, text, facts)
 
 
-def _engines(facts: dict) -> int:
+def _engine_count(facts: dict) -> int:
     # The engines that gave a verdict
     return facts["malicious"] + facts["suspicious"] + facts["undetected"] + facts["harmless"]
 
 
 def _describe_virustotal(facts: dict) -> str:
-    if not _engines(facts):
+    if not _engine_count(facts):
         text = "in VirusTotal, but no engine has checked it (unknown, not clean)"
     else:
-        text = f"{facts['malicious']} of {_engines(facts)} engines flagged it malicious"
+        text = f"{facts['malicious']} of {_engine_count(facts)} engines flagged it malicious"
         if facts["suspicious"]:
             text += f", {facts['suspicious']} suspicious"
         # A result is only as new as VirusTotal's last check, and a site can turn malicious after it
@@ -414,7 +414,7 @@ def _describe_abuseipdb(facts: dict) -> str:
     if not facts["reports"]:
         text = f"no reports in the last {ABUSEIPDB_DAYS} days"
     else:
-        text = (f"reported {count(facts['reports'], 'time')} by {count(facts['users'], 'user')} in the last "
+        text = (f"reported {pluralize(facts['reports'], 'time')} by {pluralize(facts['users'], 'user')} in the last "
                 f"{ABUSEIPDB_DAYS} days, abuse confidence {facts['confidence']}%")
     # Its trusted list is why Google's DNS server has hundreds of reports and 0% confidence
     if facts["trusted"]:

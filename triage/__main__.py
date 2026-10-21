@@ -13,7 +13,7 @@ from .checks.lookups import check_domain_age, check_microsoft_hops
 from .domains import SUFFIX_LIST_DATE
 from .enrich import look_up
 from .models import Indicators, Result
-from .reading.iocs import from_email, from_text
+from .reading.iocs import indicators_from_email, indicators_from_text
 from .reading.origin import find_origin, received_warnings
 from .reading.parser import parse_file
 from .report import Report, build_report, build_text_report, render_json, render_markdown, render_summary, render_text
@@ -26,7 +26,7 @@ MAX_TEXT_BYTES = 10 * 1024 * 1024
 OLD_SUFFIX_LIST_DAYS = 183
 
 
-def build_parser() -> argparse.ArgumentParser:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="triage",
         description=(
@@ -94,7 +94,7 @@ def main(argv=None) -> int:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
 
-    args = build_parser().parse_args(argv)
+    args = _build_parser().parse_args(argv)
     try:
         return _run(args)
     except KeyboardInterrupt:
@@ -121,12 +121,12 @@ def _run(args: argparse.Namespace) -> int:
         except (OSError, ValueError) as e:
             print(f"error: {e}", file=sys.stderr)
             return 1
-        found = from_text(text)
+        found = indicators_from_text(text)
         results = {}
         if args.enrich:
             _say_looking_up(found)
             results = look_up(found)
-        return _send(build_text_report(found, results), args)
+        return _output(build_text_report(found, results), args)
 
     try:
         parsed = parse_file(args.eml)
@@ -136,7 +136,7 @@ def _run(args: argparse.Namespace) -> int:
 
     origin = find_origin(parsed)
     checks = run_checks(parsed)
-    found = from_email(parsed, origin)
+    found = indicators_from_email(parsed, origin)
     results = {}
     if args.enrich:
         _say_looking_up(found)
@@ -145,7 +145,7 @@ def _run(args: argparse.Namespace) -> int:
         results = look_up(found, parsed.attachments, flagged, origin)
         checks += [check_domain_age(found, results), check_microsoft_hops(origin, results)]
     warnings = parsed.parse_warnings + received_warnings(parsed)
-    return _send(build_report(parsed, origin, checks, found, results, warnings), args)
+    return _output(build_report(parsed, origin, checks, found, results, warnings), args)
 
 
 def _output_problem(args: argparse.Namespace) -> str:
@@ -158,21 +158,21 @@ def _output_problem(args: argparse.Namespace) -> str:
             if Path(name).is_dir():
                 return f"{flag} names a folder"
             # Writing it would replace the email or alert text, which is the evidence
-            if source != "-" and _same_file(name, source):
+            if source != "-" and _is_same_file(name, source):
                 return f"{flag} names the file being read"
     if args.out == args.json == "-":
         return "only one of --out and --json can be - (standard output)"
-    if args.out and args.json and "-" not in (args.out, args.json) and _same_file(args.out, args.json):
+    if args.out and args.json and "-" not in (args.out, args.json) and _is_same_file(args.out, args.json):
         return "--out and --json name the same file"
     return ""
 
 
-def _same_file(a: str, b: str) -> bool:
+def _is_same_file(a: str, b: str) -> bool:
     # normcase, since Windows file names ignore case
     return os.path.normcase(Path(a).resolve()) == os.path.normcase(Path(b).resolve())
 
 
-def _send(report: Report, args: argparse.Namespace) -> int:
+def _output(report: Report, args: argparse.Namespace) -> int:
     # "-" sends the note or JSON to standard output for a pipe, so the summary goes to stderr
     outputs = [(name, render) for name, render in ((args.out, render_markdown), (args.json, render_json)) if name]
     terminal = sys.stderr if "-" in (args.out, args.json) else sys.stdout

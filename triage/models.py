@@ -69,11 +69,11 @@ def join_first_five(items: list[str], separator: str = "; ") -> str:
     return separator.join(items[:5]) + extra
 
 
-def count(number: int, word: str) -> str:
+def pluralize(number: int, word: str) -> str:
     return f"{number:,} {word}" if number == 1 else f"{number:,} {word}s"
 
 
-def encoded_addresses(addresses: list[Address], header: str = "") -> str:
+def describe_encoded_addresses(addresses: list[Address], header: str = "") -> str:
     # One sentence for any number of them, so a thousand can't bury the report
     if len(addresses) == 1:
         named = f"{header} address {addresses[0].email}" if header else addresses[0].email

@@ -5,7 +5,7 @@ from datetime import date, datetime, timezone
 
 from ..domains import hosting_service
 from ..enrich import not_sent_because, well_known
-from ..models import Check, Indicators, LookupStatus, Origin, Reputation, Result, Strength, count, join_first_five
+from ..models import Check, Indicators, LookupStatus, Origin, Reputation, Result, Strength, join_first_five, pluralize
 from ..reading.origin import MICROSOFT_SERVER_DOMAINS
 
 # A domain registered this recently is flagged, a common cut-off for newly registered
@@ -27,7 +27,7 @@ def check_domain_age(found: Indicators, results: dict[str, list[Reputation]]) ->
         if not_sent_because("domain", domain) or well_known(("domain", domain)):
             continue
         service = hosting_service(domain)
-        registered = _registered(domain, results)
+        registered = _registered_on(domain, results)
         if service:
             unknown.append(f"{domain} (only {service} has one)")
         elif registered is None or registered > today:
@@ -35,7 +35,7 @@ def check_domain_age(found: Indicators, results: dict[str, list[Reputation]]) ->
         elif registered == today:
             new.append(f"{domain} was registered {registered}, today")
         elif (today - registered).days < NEW_DOMAIN_DAYS:
-            new.append(f"{domain} was registered {registered}, {count((today - registered).days, 'day')} ago")
+            new.append(f"{domain} was registered {registered}, {pluralize((today - registered).days, 'day')} ago")
         else:
             old.append(f"{domain} {registered}")
     if new:
@@ -91,7 +91,7 @@ def check_microsoft_hops(origin: Origin | None, results: dict[str, list[Reputati
     return Check(name, Result.PASS, strength, "No hop was taken as Microsoft's on its name alone")
 
 
-def _registered(domain: str, results: dict[str, list[Reputation]]) -> date | None:
+def _registered_on(domain: str, results: dict[str, list[Reputation]]) -> date | None:
     # From the domain's VirusTotal result. A cached one could have been edited, so a date that
     # doesn't read counts as none.
     for result in results.get(domain, []):

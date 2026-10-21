@@ -113,7 +113,7 @@ def check_lookalike(parsed: ParsedEmail) -> Check:
             elif any(_whole_name_pattern(target_form).search(form) for target_form in _name_forms(target)
                      for form in forms):
                 hit = f"spells '{target}' with lookalike characters but isn't {main_domain}"
-            elif any(_typo_or_equal(keyword, words, name_words) for keyword in keywords):
+            elif any(_has_name_or_typo(keyword, words, name_words) for keyword in keywords):
                 hit = f"has a typo of '{target}' but isn't {main_domain}"
             else:
                 english = sorted({word for keyword in keywords for word in _english_typos(keyword, name_words)})
@@ -154,7 +154,7 @@ def check_brand_joined(parsed: ParsedEmail) -> Check:
             if any(keyword in word for keyword in long_forms for word in name_words if word not in long_forms):
                 result = Result.FLAG
             else:
-                result = _short_name_joined(short_forms, name_words)
+                result = _short_name_joined_result(short_forms, name_words)
             if result == Result.FLAG:
                 hits.append(f"{label} has '{target}' joined to another word but isn't "
                             f"{_main_domain(target, target_domains)}")
@@ -172,13 +172,13 @@ def check_brand_joined(parsed: ParsedEmail) -> Check:
     return Check(name, Result.PASS, strength, "No sender or link domain has a brand joined to another word")
 
 
-def _short_name_joined(keywords: set[str], name_words: set[str]) -> Result | None:
+def _short_name_joined_result(keywords: set[str], name_words: set[str]) -> Result | None:
     # Only a word phishers use makes it a flag (appleid, mymeta). Any other word that isn't
     # English could be a real name (applebees), so it's inconclusive.
     found = None
     for keyword in keywords:
         for word in name_words:
-            if keyword not in word or word in keywords or _ordinary(word):
+            if keyword not in word or word in keywords or _is_ordinary_word(word):
                 continue
             start = word.find(keyword)
             while start >= 0:
@@ -189,7 +189,7 @@ def _short_name_joined(keywords: set[str], name_words: set[str]) -> Result | Non
     return found
 
 
-def _ordinary(word: str) -> bool:
+def _is_ordinary_word(word: str) -> bool:
     return word in ALLOWED_NAMES or word in _english_words()
 
 
@@ -264,13 +264,14 @@ def _has_words(text: str, name: str) -> bool:
     return all(re.search(rf"\b{re.escape(word)}\b", text) for word in name.split())
 
 
-def _typo_or_equal(keyword: str, words: set[str], name_words: set[str]) -> bool:
+def _has_name_or_typo(keyword: str, words: set[str], name_words: set[str]) -> bool:
     # Equal counts too, for a dash in the wrong place: pay-pal becomes paypal
     if len(keyword) >= LONG_NAME_LENGTH:
-        return any(word == keyword or _one_typo_apart(word, keyword) for word in words)
+        return any(word == keyword or _is_one_typo_apart(word, keyword) for word in words)
     # An English word one letter from a short name could be a typo or just the word (appel,
     # apply), so it doesn't count here
-    return any(word == keyword or (_short_typo(word, keyword) and not _ordinary(word)) for word in name_words)
+    return any(word == keyword or (_is_short_typo(word, keyword) and not _is_ordinary_word(word))
+               for word in name_words)
 
 
 def _english_typos(keyword: str, name_words: set[str]) -> list[str]:
@@ -278,11 +279,11 @@ def _english_typos(keyword: str, name_words: set[str]) -> list[str]:
     if len(keyword) >= LONG_NAME_LENGTH:
         return []
     return [word for word in name_words
-            if _short_typo(word, keyword) and word not in ALLOWED_NAMES and word in _english_words()]
+            if _is_short_typo(word, keyword) and word not in ALLOWED_NAMES and word in _english_words()]
 
 
-def _short_typo(word: str, keyword: str) -> bool:
-    return len(keyword) >= MIN_NAME_LENGTH and _one_typo_apart(word, keyword)
+def _is_short_typo(word: str, keyword: str) -> bool:
+    return len(keyword) >= MIN_NAME_LENGTH and _is_one_typo_apart(word, keyword)
 
 
 def _domain_words(domain: str, max_length: int) -> list[str]:
@@ -317,7 +318,7 @@ def _whole_name_pattern(target: str) -> re.Pattern:
     return re.compile(r"(^|[.-])" + "[.-]?".join(re.escape(w) for w in target.split()) + r"($|[.-])")
 
 
-def _one_typo_apart(a: str, b: str) -> bool:
+def _is_one_typo_apart(a: str, b: str) -> bool:
     # One letter wrong, two neighbors swapped, one added, or one missing
     if len(a) == len(b):
         diffs = [i for i in range(len(a)) if a[i] != b[i]]
