@@ -7,6 +7,8 @@ from datetime import date
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
+import idna
+
 # The mail system's own servers. Not Python's is_private, which misses carrier-grade NAT and
 # includes reserved ranges. A hop from one of those was made up and should stay visible.
 INTERNAL_NETWORKS = [ipaddress.ip_network(n) for n in (
@@ -174,7 +176,13 @@ def browser_ipv4(host: str) -> str | None:
 
 
 def ascii_domain(domain: str) -> str:
-    # The xn-- form DNS, proxy logs and blocklists use. One the encoder refuses is kept as is.
+    # The xn-- form DNS, proxy logs and blocklists use, written as browsers write it (IDNA 2008),
+    # where straße.de isn't strasse.de. Python's older encoder takes what that refuses, like an
+    # underscore or an emoji, and one both refuse is kept as is.
+    try:
+        return idna.encode(domain, uts46=True).decode("ascii")
+    except UnicodeError:
+        pass
     try:
         return domain.encode("idna").decode("ascii")
     except UnicodeError:
@@ -215,12 +223,21 @@ def decode_idn(domain: str) -> str:
     labels = []
     for label in domain.split("."):
         if label.startswith("xn--"):
-            try:
-                label = label.encode("ascii").decode("idna")
-            except UnicodeError:
-                pass
+            label = _decoded_label(label)
         labels.append(label)
     return ".".join(labels)
+
+
+def _decoded_label(label: str) -> str:
+    # The same two ways as ascii_domain, in the same order
+    try:
+        return idna.decode(label)
+    except UnicodeError:
+        pass
+    try:
+        return label.encode("ascii").decode("idna")
+    except UnicodeError:
+        return label
 
 
 def decoded_base(domain: str) -> str:

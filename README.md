@@ -75,10 +75,10 @@ python -m pip install -r requirements.txt
 On Linux, create the environment with `python3.14 -m venv .venv` and activate it with
 `source .venv/bin/activate`.
 
-`requirements.txt` holds what the tool needs: `requests` for the lookups and its own
-dependencies, each pinned to one version so a new release isn't picked up without anyone
-looking at it. To run the tests too, install `requirements-dev.txt` instead, which adds
-pytest and coverage.
+`requirements.txt` holds what the tool needs: `requests` for the lookups, `idna` for
+writing domains as browsers do, and what `requests` installs, each pinned to one version
+so a new release isn't picked up without anyone looking at it. To run the tests too,
+install `requirements-dev.txt` instead, which adds pytest and coverage.
 
 ## Setting up the lookups
 
@@ -507,6 +507,9 @@ be slow. The emails in `tests/fixtures/` are made up.
   `xn--` form that DNS, proxy logs, and blocklists use. `http://%70aypa1.com/` is listed as
   `http://paypa1.com/`, and `http://3627734532/` as `http://216.58.214.4/`. Defanged, a
   Cyrillic `pаypal[.]com` looks just like the real one, and `xn--pypal-4ve[.]com` doesn't.
+  The `xn--` form is written by the newer standard browsers follow (IDNA 2008), so
+  `straße.de` is `xn--strae-oqa.de`. Python's own encoder, which turns it into
+  `strasse.de`, a different domain, only writes what that standard refuses, like an emoji.
 
 - **The sender's domains and the origin are listed first**, since a long email can link to
   a dozen domains before them. An IP a check flags, like a faked Microsoft hop's, is listed

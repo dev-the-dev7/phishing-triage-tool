@@ -382,6 +382,14 @@ def test_your_own_domains_arent_sent_in_either_form(server, keys, monkeypatch, l
     assert server.requests == []
 
 
+def test_an_own_domain_with_sharp_s_isnt_read_as_ss(server, keys, monkeypatch):
+    # The older standard reads it as strasse.de, a different domain
+    monkeypatch.setattr(enrich, "OWN_DOMAINS", ["stra\N{LATIN SMALL LETTER SHARP S}e.de"])
+    results = look_up(Indicators(domains=["intranet.xn--strae-oqa.de", "strasse.de"]))
+    assert texts(results)["intranet.xn--strae-oqa.de"] == ["VirusTotal: skipped, one of your own domains"]
+    assert [url for url, _ in server.requests] == [f"{VT}/domains/strasse.de"]
+
+
 def test_without_keys_nothing_is_sent(server):
     results = look_up(Indicators(urls=["https://evil.com/"], domains=["evil.com"], ips=["8.8.8.8"], hashes=[SHA]))
     assert texts(results) == {

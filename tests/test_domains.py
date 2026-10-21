@@ -123,6 +123,10 @@ def test_numeric_host_with_thousands_of_digits():
 @pytest.mark.parametrize("domain, expected", [
     ("p\N{CYRILLIC SMALL LETTER A}ypal.com", "xn--pypal-4ve.com"),
     ("paypal.com", "paypal.com"),
+    # Where browsers go, not strasse.de, a different domain the older standard gives
+    ("stra\N{LATIN SMALL LETTER SHARP S}e.de", "xn--strae-oqa.de"),
+    # Refused by the newer standard, but browsers still go there
+    ("\N{GRINNING FACE}.ws", "xn--e28h.ws"),
     # Kept as is when the encoder refuses it
     ("a..com", "a..com"),
     ("a" * 64 + ".com", "a" * 64 + ".com"),
@@ -254,6 +258,9 @@ def test_registered_name():
     # Labels are decoded one at a time, so a broken one doesn't stop the rest
     ("xn--zz.xn--pypal-4ve.com", "xn--zz.p\N{CYRILLIC SMALL LETTER A}ypal.com"),
     ("paypal.com", "paypal.com"),
+    # Decoded the two ways ascii_domain encodes
+    ("xn--strae-oqa.de", "stra\N{LATIN SMALL LETTER SHARP S}e.de"),
+    ("xn--e28h.ws", "\N{GRINNING FACE}.ws"),
 ])
 def test_decode_idn(domain, expected):
     assert decode_idn(domain) == expected

@@ -435,6 +435,18 @@ def test_own_domain_in_either_form(monkeypatch, listed, sent_from):
     assert check_lookalike(link_to("m\N{LATIN SMALL LETTER U WITH DIAERESIS}ller-login.de")).result == Result.FLAG
 
 
+STRASSE = "stra\N{LATIN SMALL LETTER SHARP S}e.de"
+
+
+@pytest.mark.parametrize("listed", [STRASSE, "xn--strae-oqa.de"])
+@pytest.mark.parametrize("sent_from", [STRASSE, "xn--strae-oqa.de"])
+def test_own_domain_with_sharp_s_in_either_form(monkeypatch, listed, sent_from):
+    # The older standard can't decode xn--strae-oqa.de, so the two forms didn't match
+    monkeypatch.setattr(impersonation, "OWN_DOMAINS", [listed])
+    assert check_lookalike(link_to(sent_from)).result == Result.PASS
+    assert check_lookalike(link_to("stra\N{LATIN SMALL LETTER SHARP S}e-login.de")).result == Result.FLAG
+
+
 @pytest.mark.parametrize("listed", BOTH_FORMS)
 @pytest.mark.parametrize("sent_from", BOTH_FORMS)
 def test_brand_domain_in_either_form(monkeypatch, listed, sent_from):
