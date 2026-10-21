@@ -1,0 +1,2 @@
+# LF on every system, whatever core.autocrlf is set to, so a Windows checkout keeps LF too
+* text=auto eol=lf
