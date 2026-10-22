@@ -56,7 +56,7 @@ def test_an_authenticated_sender_with_a_lookalike_link():
     # Anyone can make a webmail account to send from
     assert patterns_found([DMARC_PASS, LOOKALIKE, WEBMAIL], links=LOOKALIKE_LINK) == []
     # Ordinary mail trips these, with click tracking and a template's javascript:void(0)
-    assert patterns_found([DMARC_PASS, Check("Link text vs destination", "flag", "strong", ""),
+    assert patterns_found([DMARC_PASS, Check("Link mismatch", "flag", "strong", ""),
                            Check("Script, file or app link", "flag", "medium", "")]) == []
 
 

@@ -25,10 +25,11 @@ from triage.checks import impersonation
 from triage.models import LookupStatus, Reputation
 
 FIXTURES = Path(__file__).parent / "fixtures"
-# Ambiguous From, Google redirect, Hidden text, Image only and Text added by CSS are left out,
+# Ambiguous From, Google redirect, Hidden text, Image-only email and Text added by CSS are left out,
 # since they're only listed when they find something
-CHECK_NAMES = ["SPF", "DKIM", "DMARC", "Reply-To", "Return-Path domain", "Display name", "Free webmail sender",
-               "Lookalike domain", "Brand joined to a word", "Link text vs destination", "Script, file or app link"]
+CHECK_NAMES = ["SPF", "DKIM", "DMARC", "Reply-To mismatch", "Return-Path mismatch", "Display name mismatch",
+               "Free webmail sender", "Lookalike domain", "Brand joined to a word", "Link mismatch",
+               "Script, file or app link"]
 
 
 def run(capsys, *args) -> tuple[int, str, str]:
@@ -87,7 +88,7 @@ def test_suspicious_email(capsys):
         "Account_Statement.pdf (application/pdf, 60 bytes)",
     ]
     flagged = {name for name, result in results(out).items() if result == "FLAG"}
-    assert flagged == {"DMARC", "Reply-To", "Display name", "Lookalike domain", "Link text vs destination"}
+    assert flagged == {"DMARC", "Reply-To mismatch", "Display name mismatch", "Lookalike domain", "Link mismatch"}
     # The tracking image is listed too, and www.paypal.com, which a link only shows, isn't
     assert section(out, "Indicators, defanged") == [
         "  URL      hxxp://paypa1[.]com/login/verify?case=88213",
@@ -111,7 +112,7 @@ def test_ceo_fraud_needs_executives_filled_in(capsys, monkeypatch):
     assert {name for name, result in results(out).items() if result == "FLAG"} == {"Free webmail sender"}
     monkeypatch.setattr(impersonation, "EXECUTIVES", {"Sarah Chen"})
     _, out, _ = run(capsys, FIXTURES / "ceo_fraud.eml")
-    assert results(out)["Display name"] == "FLAG"
+    assert results(out)["Display name mismatch"] == "FLAG"
 
 
 def test_text_from_the_email_is_printed_escaped(capsys, tmp_path):
@@ -139,8 +140,7 @@ def test_caveats_are_printed_under_their_check(capsys, tmp_path):
     ))
     _, out, _ = run(capsys, path)
     lines = out.splitlines()
-    flag = lines.index("  FLAG         strong      Link text vs destination: text shows paypal.com but goes to "
-                       "evil.net")
+    flag = lines.index("  FLAG         strong      Link mismatch: text shows paypal.com but goes to evil.net")
     assert lines[flag + 1] == (" " * 27 + "Caveat: A tag sits in the middle of paypal.com in a link to evil.com, "
                                "where CSS could change what the reader sees. Check what the link looks like in a "
                                "mail client, without clicking it.")

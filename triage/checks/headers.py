@@ -258,7 +258,7 @@ def check_reply_to(parsed: ParsedEmail) -> Check:
 
 
 def _check_reply_to(parsed: ParsedEmail, from_addr: Address | None) -> Check:
-    name, strength = "Reply-To", Strength.STRONG
+    name, strength = "Reply-To mismatch", Strength.STRONG
     caveats = []
     if parsed.reply_to_headers > 1:
         caveats.append(f"The email has {parsed.reply_to_headers} Reply-To headers, where one is allowed. Which "
@@ -302,7 +302,7 @@ def check_return_path(parsed: ParsedEmail) -> Check:
 
 def _check_return_path(parsed: ParsedEmail, from_addr: Address | None) -> Check:
     # Weak on its own: mailing services often use their own bounce domain
-    name, strength = "Return-Path domain", Strength.WEAK
+    name, strength = "Return-Path mismatch", Strength.WEAK
     if parsed.return_path_headers > 1:
         found = join_first_five([address.email for address in parsed.return_path])
         listed = f", with {found}" if found else ""

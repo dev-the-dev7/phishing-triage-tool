@@ -18,10 +18,10 @@ Strongest flag: strong. Flagged: 4 strong, 1 medium. Inconclusive: 1. Passed: 5.
 ## Signals
 
 - **DMARC** (strong): `dmarc=fail for paypa1[.]com (from mx[.]example[.]net, ignored 1 untrusted header(s))`
-- **Reply-To** (strong): `Replies go to account-resolution[.]example, not paypa1[.]com`
+- **Reply-To mismatch** (strong): `Replies go to account-resolution[.]example, not paypa1[.]com`
 - **Lookalike domain** (strong): `paypa1[.]com [link, sender] spells 'paypal' with lookalike characters but isn't paypal[.]com`
-- **Link text vs destination** (strong): `text shows www[.]paypal[.]com but goes to paypa1[.]com`
-- **Display name** (medium): `"PayPal Security" mentions "paypal" but the mail is from paypa1[.]com`
+- **Link mismatch** (strong): `text shows www[.]paypal[.]com but goes to paypa1[.]com`
+- **Display name mismatch** (medium): `"PayPal Security" mentions "paypal" but the mail is from paypa1[.]com`
 
 ## Inconclusive
 
@@ -29,7 +29,7 @@ Strongest flag: strong. Flagged: 4 strong, 1 medium. Inconclusive: 1. Passed: 5.
 
 ## Passed
 
-SPF; Script, file or app link; Return-Path domain; Free webmail sender; Brand joined to a word
+SPF; Script, file or app link; Return-Path mismatch; Free webmail sender; Brand joined to a word
 
 ## Indicators
 

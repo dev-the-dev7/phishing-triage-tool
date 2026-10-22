@@ -414,8 +414,9 @@ def test_a_dmarc_pass_for_one_from_doesnt_cover_another():
 @pytest.mark.parametrize("header_lines, name, evidence", [
     (("From: a@example.org", "From: x@gmail.com"), "Free webmail sender",
      "Sent from a free gmail.com account, which anyone can create"),
-    (("From: a@evil.com, b@paypal.com", "Reply-To: x@evil.com"), "Reply-To", "Replies go to evil.com, not paypal.com"),
-    (("From: a@evil.com", 'From: "PayPal" <x@evil.net>'), "Display name",
+    (("From: a@evil.com, b@paypal.com", "Reply-To: x@evil.com"), "Reply-To mismatch",
+     "Replies go to evil.com, not paypal.com"),
+    (("From: a@evil.com", 'From: "PayPal" <x@evil.net>'), "Display name mismatch",
      '"PayPal" mentions "paypal" but the mail is from evil.net'),
 ])
 def test_a_flag_on_any_from_counts(header_lines, name, evidence):
@@ -425,7 +426,7 @@ def test_a_flag_on_any_from_counts(header_lines, name, evidence):
 
 def test_a_pass_needs_every_from():
     found = checks_of("From: a@example.org, undisclosed", "Return-Path: <bounce@example.org>")
-    assert found["Return-Path domain"].result == INCONCLUSIVE
+    assert found["Return-Path mismatch"].result == INCONCLUSIVE
     # Said once when every From gives the same reason
     found = checks_of("From: a@example.org", "From: b@mail.example.org")
     assert (found["Free webmail sender"].result, found["Free webmail sender"].evidence) == (
@@ -435,7 +436,7 @@ def test_a_pass_needs_every_from():
 def test_caveats_are_said_once():
     found = checks_of("From: a@example.org", "From: b@example.org", "Reply-To: a@example.org",
                       "Reply-To: b@example.org")
-    assert len(found["Reply-To"].caveats) == 1
+    assert len(found["Reply-To mismatch"].caveats) == 1
 
 
 def test_past_the_limit_a_check_cant_pass(monkeypatch):

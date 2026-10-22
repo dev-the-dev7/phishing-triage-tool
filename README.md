@@ -8,7 +8,8 @@ The analyst makes the call.
 - Parsing the email: headers, addresses, text and HTML bodies, links, and attachment hashes
   (SHA-256, computed in memory)
 - Checks on the sender: SPF, DKIM, and DMARC results, a From that can be read more than
-  one way, Reply-To, Return-Path, display name, and free webmail
+  one way, a Reply-To, Return-Path, or display name that doesn't match the sender, and
+  free webmail
 - Lookalike domains and brands joined to other words, in the sender and in links, with
   short brand names like Apple and Meta checked against an English word list, so ordinary
   words aren't flagged
@@ -186,8 +187,8 @@ triage/
     iocs.py               lists the indicators, from the email or from --text alert text
   checks/                 judges the email: each check gives flag, pass, or inconclusive
     __init__.py           runs the ones that need only the email
-    headers.py            SPF, DKIM, DMARC, Ambiguous From, Reply-To, Return-Path,
-                          free webmail
+    headers.py            SPF, DKIM, DMARC, Ambiguous From, Reply-To and Return-Path
+                          mismatches, free webmail
     impersonation.py      posing as a brand, your organization, or an executive
     links.py              where links go and what they open
     content.py            hidden text, image-only emails, text added by CSS

@@ -30,7 +30,7 @@ def check_display_name(parsed: ParsedEmail) -> Check:
 
 
 def _check_display_name(from_addr: Address | None) -> Check:
-    name, strength = "Display name", Strength.MEDIUM
+    name, strength = "Display name mismatch", Strength.MEDIUM
     if not from_addr:
         return Check(name, Result.INCONCLUSIVE, strength, "No readable From address")
     if not from_addr.display_name:

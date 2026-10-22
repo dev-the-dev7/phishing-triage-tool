@@ -678,8 +678,7 @@ def test_base_limit(monkeypatch):
     assert [href for href, _ in links_in(over_limit)] == ["https://one.com/login", "https://two.com/login"]
     unread = ("The HTML has 3 different <base> tags, which set where links go. Links were read against the "
               "first 2. Check the rest by hand.")
-    assert check_link_mismatch(over_limit) == Check("Link text vs destination", Result.INCONCLUSIVE, "strong",
-                                                    unread)
+    assert check_link_mismatch(over_limit) == Check("Link mismatch", Result.INCONCLUSIVE, "strong", unread)
     flagged = check_link_mismatch(html_email(bases + '<base href="https://evil.com/">'
                                                      '<a href="/login">paypal.com</a>'))
     assert (flagged.result, flagged.caveats) == (Result.FLAG, [unread])

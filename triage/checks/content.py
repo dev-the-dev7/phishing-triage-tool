@@ -37,6 +37,6 @@ def check_image_only(parsed: ParsedEmail) -> list[Check]:
         return []
     # No count in the evidence: an image in the HTML is often also an attachment (cid:), and
     # counting both would double it
-    return [Check("Image only", Result.FLAG, Strength.MEDIUM,
+    return [Check("Image-only email", Result.FLAG, Strength.MEDIUM,
                   "The email shows images and no text. Any text or QR code in them can't be checked, "
                   "so look at them by hand, and don't scan a QR code to see where it goes.")]

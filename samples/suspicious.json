@@ -70,7 +70,7 @@
       "caveats": []
     },
     {
-      "name": "Reply-To",
+      "name": "Reply-To mismatch",
       "result": "flag",
       "strength": "strong",
       "evidence": "Replies go to account-resolution.example, not paypa1.com",
@@ -84,14 +84,14 @@
       "caveats": []
     },
     {
-      "name": "Link text vs destination",
+      "name": "Link mismatch",
       "result": "flag",
       "strength": "strong",
       "evidence": "text shows www.paypal.com but goes to paypa1.com",
       "caveats": []
     },
     {
-      "name": "Display name",
+      "name": "Display name mismatch",
       "result": "flag",
       "strength": "medium",
       "evidence": "\"PayPal Security\" mentions \"paypal\" but the mail is from paypa1.com",
@@ -119,7 +119,7 @@
       "caveats": []
     },
     {
-      "name": "Return-Path domain",
+      "name": "Return-Path mismatch",
       "result": "pass",
       "strength": "weak",
       "evidence": "Return-Path matches the From domain (paypa1.com)",

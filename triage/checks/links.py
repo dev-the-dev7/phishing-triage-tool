@@ -23,7 +23,7 @@ LINK_TYPES = {
 
 
 def check_link_mismatch(parsed: ParsedEmail) -> Check:
-    name, strength = "Link text vs destination", Strength.STRONG
+    name, strength = "Link mismatch", Strength.STRONG
     mismatches, split = [], []
     for link in parsed.links:
         href_host = url_host(link.href)

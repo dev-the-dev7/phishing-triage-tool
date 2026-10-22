@@ -149,7 +149,7 @@ def test_hidden_text_that_isnt_inside_a_word(html):
 def test_email_that_is_only_an_image(html):
     check = check_image_only(html_email(html))
     assert [(c.name, c.result, c.evidence) for c in check] == [
-        ("Image only", Result.FLAG, "The email shows images and no text. Any text or QR code in them can't be "
+        ("Image-only email", Result.FLAG, "The email shows images and no text. Any text or QR code in them can't be "
          "checked, so look at them by hand, and don't scan a QR code to see where it goes.")]
 
 
