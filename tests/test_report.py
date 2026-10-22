@@ -41,12 +41,26 @@ def test_nothing_flagged():
     assert section(text, "Warnings about the tool's reading") == ["  w"]
 
 
-def test_email_lines_leave_out_what_isnt_there():
+def test_email_lines_say_what_isnt_there():
+    # Left out, a header the email doesn't have would look like one the tool missed
     assert section(render_text(report_of()), "Email") == [
         "  From:        a@example.org",
+        "  Sender:      (none)",
+        "  To:          (none)",
+        "  Reply-To:    (none)",
+        "  Return-Path: (none)",
+        "  Date:        (none)",
+        "  Message-ID:  (none)",
         "  Origin:      unknown, no Received headers with an IP",
         "  Links: 0   Attachments: 0",
     ]
+    # Every email needs a From
+    assert section(render_text(report_of(from_addrs=[])), "Email")[0] == "  From:        (missing)"
+    # One the tool couldn't read isn't missing
+    report = report_of(from_addrs=[], unread_address_headers=["From", "Reply-To"])
+    email = section(render_text(report), "Email")
+    assert (email[0], email[3]) == ("  From:        (couldn't be read)", "  Reply-To:    (couldn't be read)")
+    assert json.loads(render_json(report))["email"]["unread_address_headers"] == ["From", "Reply-To"]
 
 
 def test_text_from_the_email_cant_add_lines_or_hide_characters():
@@ -75,7 +89,7 @@ def test_a_padded_name_cant_hide_the_address():
     email = section(render_text(report_of(from_addrs=[sender], to=to)), "Email")
     assert email[0].startswith(r'  From:        "PayPal\" <service@paypal.com>   ')
     assert email[0].endswith('" <attacker@evil.com>')
-    assert email[1] == ("  To:          user0@example.net; user1@example.net; user2@example.net; user3@example.net; "
+    assert email[2] == ("  To:          user0@example.net; user1@example.net; user2@example.net; user3@example.net; "
                         "user4@example.net (and 2 more)")
 
 
@@ -159,6 +173,11 @@ def test_the_note_follows_the_guide():
     assert note_section(note, "## Summary") == [
         "Strongest flag: strong. Flagged: 1 strong. Inconclusive: 1. Passed: 2. Indicators: 1. Warnings: 1.",
         "- From: `a[@]paypa1[.]com`",
+        "- Sender: (none)",
+        "- To: (none)",
+        "- Reply-To: (none)",
+        "- Return-Path: (none)",
+        "- Date: (none)",
         "- Message-ID: `<1[@]paypa1[.]com>`",
         "- Origin: unknown, no Received headers with an IP",
         "- Links: 0. Attachments: 1",
@@ -211,7 +230,7 @@ def test_every_return_path_is_shown():
     # One is the provider's, and it isn't always the first
     report = report_of(return_path=[Address("", "bounce@paypal.com", "paypal.com"),
                                     Address("", "x@evil.com", "evil.com")])
-    assert section(render_text(report), "Email")[1] == "  Return-Path: bounce@paypal.com; x@evil.com"
+    assert section(render_text(report), "Email")[4] == "  Return-Path: bounce@paypal.com; x@evil.com"
     assert json.loads(render_json(report))["email"]["return_path"] == [
         {"name": "", "address": "bounce@paypal.com"}, {"name": "", "address": "x@evil.com"}]
 

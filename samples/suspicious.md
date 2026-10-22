@@ -5,6 +5,7 @@
 Strongest flag: strong. Flagged: 4 strong, 1 medium. Inconclusive: 1. Passed: 5. Indicators: 11.
 
 - From: `"PayPal Security" <security[@]paypa1[.]com>`
+- Sender: (none)
 - To: `"Jordan Lee" <jordan[.]lee[@]example[.]net>`
 - Reply-To: `case-review[@]account-resolution[.]example`
 - Return-Path: `bounce[@]paypa1[.]com`

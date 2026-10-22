@@ -41,6 +41,7 @@ class EmailFacts:
     to: list[Address]
     reply_to: list[Address]
     return_path: list[Address]
+    unread_address_headers: list[str]
     subject: str
     date: str
     message_id: str
@@ -83,8 +84,9 @@ class Report:
 
 def build_report(parsed: ParsedEmail, origin: Origin | None, checks: list[Check], found: Indicators,
                  results: dict[str, list[Reputation]], warnings: list[str]) -> Report:
-    email = EmailFacts(parsed.from_addrs, parsed.sender, parsed.to, parsed.reply_to, parsed.return_path, parsed.subject,
-                       parsed.date, parsed.message_id, len(parsed.links), parsed.attachments)
+    email = EmailFacts(parsed.from_addrs, parsed.sender, parsed.to, parsed.reply_to, parsed.return_path,
+                       parsed.unread_address_headers, parsed.subject, parsed.date, parsed.message_id, len(parsed.links),
+                       parsed.attachments)
     # sorted() keeps the checks' own order within a result and strength
     findings = sorted(checks, key=lambda check: (RESULT_ORDER.index(check.result),
                                                  STRENGTH_ORDER.index(check.strength)))
@@ -179,12 +181,7 @@ def _counts(report: Report) -> list[str]:
 
 def _email_lines(report: Report) -> list[str]:
     email = report.email
-    lines = [] if email.from_addrs else ["  From:        (missing)"]
-    for label, addresses in _address_fields(email):
-        lines.append(f"  {label + ':':<12} {join_first_five(list(map(_address, addresses)))}")
-    for label, value in (("Date", email.date), ("Message-ID", email.message_id)):
-        if value:
-            lines.append(f"  {label + ':':<12} {_shown(value)}")
+    lines = [f"  {label + ':':<12} {value}" for label, value in _header_fields(email, _address, _shown)]
     origin, *claim = _origin_parts(report, _shown)
     lines += [f"  Origin:      {origin}", *(f"{'':15}{line}" for line in claim)]
     lines.append(f"  Links: {email.links}   Attachments: {len(email.attachments)}")
@@ -197,10 +194,24 @@ def _file_name(attachment: Attachment, shown) -> str:
     return shown(attachment.filename) if attachment.filename else "(no name)"
 
 
-def _address_fields(email: EmailFacts) -> list[tuple[str, list[Address]]]:
-    fields = [("From", email.from_addrs), ("Sender", email.sender), ("To", email.to), ("Reply-To", email.reply_to),
-              ("Return-Path", email.return_path)]
-    return [(label, addresses) for label, addresses in fields if addresses]
+def _header_fields(email: EmailFacts, address, shown) -> list[tuple[str, str]]:
+    # Listed even when empty, so a header the email doesn't have isn't taken for one the tool
+    # couldn't read
+    fields = []
+    for label, found in (("From", email.from_addrs), ("Sender", email.sender), ("To", email.to),
+                         ("Reply-To", email.reply_to), ("Return-Path", email.return_path)):
+        if found:
+            fields.append((label, join_first_five(list(map(address, found)))))
+        elif label in email.unread_address_headers:
+            fields.append((label, "(couldn't be read)"))
+        elif label == "From":
+            # Every email needs one
+            fields.append((label, "(missing)"))
+        else:
+            fields.append((label, "(none)"))
+    fields += [(label, shown(value) if value else "(none)")
+               for label, value in (("Date", email.date), ("Message-ID", email.message_id))]
+    return fields
 
 
 def _address(address: Address) -> str:
@@ -269,12 +280,7 @@ def render_markdown(report: Report) -> str:
 
 def _md_email(report: Report) -> list[str]:
     email = report.email
-    lines = [] if email.from_addrs else ["- From: (missing)"]
-    for label, addresses in _address_fields(email):
-        lines.append(f"- {label}: {join_first_five(list(map(_md_address, addresses)))}")
-    for label, value in (("Date", email.date), ("Message-ID", email.message_id)):
-        if value:
-            lines.append(f"- {label}: {_md(value)}")
+    lines = [f"- {label}: {value}" for label, value in _header_fields(email, _md_address, _md)]
     lines.append(f"- Origin: {'; '.join(_origin_parts(report, _md))}")
     lines.append(f"- Links: {email.links}. Attachments: {len(email.attachments)}")
     lines += [f"  - {_file_name(a, _md)} ({_md(a.content_type)}, {a.size:,} bytes), SHA-256 {_code(a.sha256)}"
@@ -357,6 +363,7 @@ def render_json(report: Report) -> str:
             "to": list(map(_json_address, email.to)),
             "reply_to": list(map(_json_address, email.reply_to)),
             "return_path": list(map(_json_address, email.return_path)),
+            "unread_address_headers": email.unread_address_headers,
             "subject": email.subject, "date": email.date, "message_id": email.message_id, "link_count": email.links,
             "attachments": [{"filename": a.filename, "content_type": a.content_type, "size": a.size,
                              "sha256": a.sha256} for a in email.attachments],

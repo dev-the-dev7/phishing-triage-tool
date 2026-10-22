@@ -73,6 +73,7 @@ def test_suspicious_email(capsys):
     ]
     assert section(out, "Email") == [
         '  From:        "PayPal Security" <security@paypa1.com>',
+        "  Sender:      (none)",
         '  To:          "Jordan Lee" <jordan.lee@example.net>',
         "  Reply-To:    case-review@account-resolution.example",
         "  Return-Path: bounce@paypa1.com",
