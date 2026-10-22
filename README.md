@@ -36,10 +36,9 @@ The analyst makes the call.
 
 ## Installing
 
-The tool needs Python 3.14 or newer, and is tested with 3.14 on Windows and Linux
-and with 3.15 on Windows. On an older version it stops with an error instead of running,
-since an older Python can read an email differently, and a check can then pass when it
-shouldn't.
+The tool needs Python 3.14 or newer, and is tested with 3.14 and 3.15 on Windows and
+Linux. On an older version it stops with an error instead of running, since an older
+Python can read an email differently, and a check can then pass when it shouldn't.
 
 It runs from this folder with `python -m triage`, without being installed as a package.
 To set it up in PowerShell:
