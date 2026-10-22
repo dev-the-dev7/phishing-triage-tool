@@ -234,7 +234,7 @@ def test_the_note_and_json_are_written(capsys, tmp_path):
                                     "Flagged: 4 strong, 1 medium   Inconclusive: 1   Passed: 5   Indicators: 11",
                                     f"Wrote {note} and {report}"]
     assert note.read_bytes().startswith(b"# Phishing triage: ")
-    assert json.loads(report.read_bytes())["format"] == 2
+    assert json.loads(report.read_bytes())["format"] == 3
     # \n endings on Windows too, and no .new file left behind
     assert b"\r\n" not in note.read_bytes() + report.read_bytes()
     assert sorted(path.name for path in tmp_path.iterdir()) == ["note.md", "report.json"]
@@ -275,7 +275,7 @@ def test_names_that_differ_in_case_are_the_same_file_on_windows(capsys):
 def test_a_dash_prints_the_note_or_json_for_a_pipe(capsys, tmp_path, flag):
     code, out, err = run(capsys, FIXTURES / "suspicious.eml", flag, "-")
     assert code == 0
-    assert out.startswith("# Phishing triage: ") if flag == "--out" else json.loads(out)["format"] == 2
+    assert out.startswith("# Phishing triage: ") if flag == "--out" else json.loads(out)["format"] == 3
     assert err.splitlines()[1] == "Strongest flag: strong"
     assert "Wrote" not in err
 

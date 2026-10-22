@@ -1,5 +1,5 @@
 {
-  "format": 2,
+  "format": 3,
   "email": {
     "from": [
       {
@@ -222,9 +222,45 @@
   "not_looked_up": [],
   "warnings": [],
   "follow_ups": [
-    "Find other recipients of the same message (search by its Message-ID or sender)",
-    "Check whether anyone clicked a link (proxy or DNS logs for the indicator domains) or replied",
-    "Block the attacker's own sender address and domains, not spoofed or shared ones like a webmail or link-shortening service"
+    {
+      "text": "Find other recipients of the same message (search by its Message-ID or sender)",
+      "values": {
+        "Message-ID": [
+          "<20261005161418.4417@paypa1.com>"
+        ],
+        "From": [
+          "security@paypa1.com"
+        ]
+      }
+    },
+    {
+      "text": "Check whether anyone replied (search sent mail for the address replies go to)",
+      "values": {
+        "Reply-To": [
+          "case-review@account-resolution.example"
+        ]
+      }
+    },
+    {
+      "text": "Check whether anyone clicked a link (proxy or DNS logs for the indicator domains). If anyone entered a password, reset it and end their sessions",
+      "values": {}
+    },
+    {
+      "text": "Search EDR for the attachments' SHA-256, to find computers that saved or opened them",
+      "values": {}
+    },
+    {
+      "text": "Block the lookalike or newly registered domains",
+      "values": {
+        "Domains": [
+          "paypa1.com"
+        ]
+      }
+    },
+    {
+      "text": "Tell whoever the display name pretends to be, like an executive or a brand's phishing team",
+      "values": {}
+    }
   ],
   "analyst": {
     "verdict": null,

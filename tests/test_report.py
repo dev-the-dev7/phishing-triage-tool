@@ -338,7 +338,7 @@ def test_the_json_holds_the_same_report():
     text = render_json(report)
     assert text.isascii()
     data = json.loads(text)
-    assert data["format"] == 2
+    assert data["format"] == 3
     assert data["email"]["subject"] == "Hi\x1b\N{RIGHT-TO-LEFT OVERRIDE}"
     assert data["origin"] == {"ip": "8.8.8.8", "name": "x", "received_by": "mx.example.net", "earliest_claim": None,
                               "network": None}
@@ -351,7 +351,11 @@ def test_the_json_holds_the_same_report():
                                    "named_by": None, "lookups": [{"service": "VirusTotal", "status": "found",
                                                                   "text": "3 of 90", "facts": {"malicious": 3}}]}]
     assert data["analyst"] == {"verdict": None, "actions_taken": None}
-    assert len(data["follow_ups"]) == 3
+    # The note's suggestions, with the values under them as found, not defanged
+    note = note_section(render_markdown(report), "## Typical follow-ups if confirmed malicious")
+    assert [f["text"] for f in data["follow_ups"]] == [line.removeprefix("- ") for line in note
+                                                      if line.startswith("- ")]
+    assert data["follow_ups"][0]["values"] == {"From": ["a@example.org"]}
 
 
 def test_the_json_names_each_lookup_status():

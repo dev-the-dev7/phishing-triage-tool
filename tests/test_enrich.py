@@ -231,6 +231,14 @@ def test_domain_age(domains, results, result, evidence):
     assert (check.result, check.evidence) == (result, evidence)
 
 
+def test_only_new_domains_are_flagged():
+    # The follow-ups suggest blocking them
+    results = {"evil.com": registered("2027-01-10"), "old.com": registered("2004-03-01"),
+               "x.com": registered("2027-01-15")}
+    check = check_domain_age(Indicators(domains=["evil.com", "old.com", "x.com", "y.com"]), results)
+    assert check.domains == ["evil.com", "x.com"]
+
+
 def test_your_own_domains_age_isnt_in_question(monkeypatch):
     monkeypatch.setattr(enrich, "OWN_DOMAINS", ["contoso.com"])
     assert check_domain_age(Indicators(domains=["mail.contoso.com"]), {}).result == Result.PASS

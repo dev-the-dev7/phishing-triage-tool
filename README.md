@@ -200,6 +200,7 @@ triage/
     __init__.py           builds one report and renders it for the terminal, as
                           Markdown, and as JSON, so the three can't disagree
     patterns.py           finds patterns in the findings, without changing any result
+    follow_ups.py         picks the follow-ups the note suggests from what was found
   models.py               the data passed between the stages, and how evidence is written
   domains.py              helpers for domains, hosts, and IPs
   public_suffix_list.dat  the Public Suffix List that domains.py reads
@@ -272,11 +273,22 @@ be slow. The emails in `tests/fixtures/` are made up.
 
 - **The note is written for a ticket.** It follows the usual triage note: a summary, any
   patterns, the flags with their evidence, what was inconclusive or passed, the indicators,
-  typical follow-ups worded as suggestions, and blank fields for the analyst's verdict and
+  follow-ups worded as suggestions, and blank fields for the analyst's verdict and
   actions, which the tool never fills in. Every value from the email or a lookup is in a
   code span and defanged, so it can't make a link, an image, or formatting, whether the
   ticket system reads Markdown or not. That includes the Message-ID and addresses, which
   have to be refanged before searching for them.
+
+- **The follow-ups are picked from what was found**, so the analyst edits a list instead
+  of writing one. The reply search names the Reply-To when there is one, the click search
+  only appears when there are URLs, and the EDR search when there are attachments. Only
+  lookalike and newly registered domains are named for blocking, since they're likely the
+  attacker's own, and blocking a spoofed or shared domain would cut off real senders. For
+  a free webmail sender, it's the address, never the webmail domain. A display name
+  posing as someone adds telling them, and an authenticated sender with a lookalike link
+  adds telling the sender's organization instead of blocking. They're picked from
+  results, flagged domains, and pattern names, never from evidence or caveats, which are
+  written for people to read.
 
 - **The JSON keeps values exactly as found**, since a tool that blocks or searches needs
   the real URL, with each indicator's defanged form next to it. It's plain ASCII: anything

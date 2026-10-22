@@ -274,7 +274,7 @@ def _check_reply_to(parsed: ParsedEmail, from_addr: Address | None) -> Check:
                      caveats + noted)
 
     # On free webmail everyone shares the domain, so compare the whole address instead
-    if _is_free_webmail(from_addr.domain):
+    if is_free_webmail(from_addr.domain):
         expected = from_addr.email.lower()
         mismatches = [a.email for a in parsed.reply_to if a.email.lower() != expected]
     else:
@@ -332,11 +332,11 @@ def _check_free_email(from_addr: Address | None) -> Check:
     if not from_addr or not from_addr.domain:
         return Check(name, Result.INCONCLUSIVE, strength, "No readable From domain")
     base = base_domain(from_addr.domain)
-    if _is_free_webmail(base):
+    if is_free_webmail(base):
         return Check(name, Result.FLAG, strength, f"Sent from a free {base} account, which anyone can create")
     return Check(name, Result.PASS, strength, f"{base} isn't on the free webmail list")
 
 
-def _is_free_webmail(domain: str) -> bool:
+def is_free_webmail(domain: str) -> bool:
     # Decoded like the email's domain, so the list can write a provider either way
     return decoded_base(domain) in {decode_idn(d) for d in FREE_EMAIL_DOMAINS}

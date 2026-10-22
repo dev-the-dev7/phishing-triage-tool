@@ -7,6 +7,7 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 
+from .follow_ups import FollowUp, suggest_follow_ups
 from .patterns import Pattern, find_patterns
 from ..domains import base_domain
 from ..enrich import network
@@ -25,15 +26,8 @@ HASH_NAMES = {32: "MD5", 40: "SHA-1", 64: "SHA-256"}
 RESULT_ORDER = [Result.FLAG, Result.INCONCLUSIVE, Result.PASS]
 STRENGTH_ORDER = [Strength.VERY_STRONG, Strength.STRONG, Strength.MEDIUM, Strength.WEAK]
 
-# Suggestions for the analyst, never steps the tool took
-FOLLOW_UPS = [
-    "Find other recipients of the same message (search by its Message-ID or sender)",
-    "Check whether anyone clicked a link (proxy or DNS logs for the indicator domains) or replied",
-    "Block the attacker's own sender address and domains, not spoofed or shared ones like a webmail or "
-    "link-shortening service",
-]
 # Changed when a field is renamed, removed, or changes type, so tools reading the JSON can tell
-JSON_FORMAT = 2
+JSON_FORMAT = 3
 
 
 @dataclass
@@ -77,6 +71,7 @@ class Report:
     not_looked_up: list[NotLookedUp]
     warnings: list[str]  # about the tool's reading of the email, not the email itself
     patterns: list[Pattern] = field(default_factory=list)
+    follow_ups: list[FollowUp] = field(default_factory=list)
 
     @property
     def strongest_flag(self) -> Strength | None:
@@ -97,8 +92,9 @@ def build_report(parsed: ParsedEmail, origin: Origin | None, checks: list[Check]
              if ip not in found.ips}
     indicators, not_looked_up = _indicator_rows(found, results, named)
     origin_network = _network(results.get(origin.ip, [])) if origin and origin.ip else ""
-    return Report(email, origin, origin_network, findings, indicators, not_looked_up, warnings,
-                  find_patterns(parsed, findings))
+    patterns = find_patterns(parsed, findings)
+    return Report(email, origin, origin_network, findings, indicators, not_looked_up, warnings, patterns,
+                  suggest_follow_ups(parsed, findings, patterns, found))
 
 
 def build_text_report(found: Indicators, results: dict[str, list[Reputation]]) -> Report:
@@ -346,14 +342,12 @@ def _md_table(rows: list[list[str]]) -> list[str]:
 
 
 def _md_follow_ups(report: Report) -> list[str]:
-    find, *rest = FOLLOW_UPS
-    lines = [f"- {find}"]
-    if report.email.message_id:
-        lines.append(f"  - Message-ID: {_md(report.email.message_id)}")
-    for label, addresses in (("From", report.email.from_addrs), ("Sender", report.email.sender)):
-        if addresses:
-            lines.append(f"  - {label}: {join_first_five([_md(a.email) for a in addresses])}")
-    return lines + [f"- {suggestion}" for suggestion in rest]
+    lines = []
+    for follow_up in report.follow_ups:
+        lines.append(f"- {follow_up.text}")
+        lines += [f"  - {label}: {join_first_five(list(map(_md, values)))}"
+                  for label, values in follow_up.values.items()]
+    return lines
 
 
 def _md(text: str, limit: int = MAX_VALUE_CHARS) -> str:
@@ -405,7 +399,7 @@ def render_json(report: Report) -> str:
                                     for r in row.results]} for row in report.indicators],
         "not_looked_up": [{"service": m.service, "text": m.text, "count": m.count} for m in report.not_looked_up],
         "warnings": report.warnings,
-        "follow_ups": FOLLOW_UPS if email else [],
+        "follow_ups": [{"text": f.text, "values": f.values} for f in report.follow_ups],
         "analyst": {"verdict": None, "actions_taken": None},
     }
     return json.dumps(data, indent=2) + "\n"

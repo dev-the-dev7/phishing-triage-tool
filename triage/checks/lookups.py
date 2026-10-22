@@ -22,7 +22,8 @@ def check_domain_age(found: Indicators, results: dict[str, list[Reputation]]) ->
     # names that aren't sent aren't in question.
     name, strength = "Newly registered domain", Strength.MEDIUM
     today = datetime.fromtimestamp(time.time(), timezone.utc).date()
-    new, old, unknown = [], [], []
+    # new is by domain, since the follow-ups suggest blocking them
+    new, old, unknown = {}, [], []
     for domain in found.domains:
         if not_sent_because("domain", domain) or well_known(("domain", domain)):
             continue
@@ -33,13 +34,13 @@ def check_domain_age(found: Indicators, results: dict[str, list[Reputation]]) ->
         elif registered is None or registered > today:
             unknown.append(domain)
         elif registered == today:
-            new.append(f"{domain} was registered {registered}, today")
+            new[domain] = f"{domain} was registered {registered}, today"
         elif (today - registered).days < NEW_DOMAIN_DAYS:
-            new.append(f"{domain} was registered {registered}, {pluralize((today - registered).days, 'day')} ago")
+            new[domain] = f"{domain} was registered {registered}, {pluralize((today - registered).days, 'day')} ago"
         else:
             old.append(f"{domain} {registered}")
     if new:
-        return Check(name, Result.FLAG, strength, join_first_five(new))
+        return Check(name, Result.FLAG, strength, join_first_five(list(new.values())), domains=list(new))
     if unknown:
         return Check(name, Result.INCONCLUSIVE, strength, f"No registration date for {join_first_five(unknown)}")
     if old:
