@@ -288,6 +288,21 @@ def test_reply_to(reply_tos, expected):
     assert reply_to_check(*reply_tos).result == expected
 
 
+@pytest.mark.parametrize("reply_tos", [
+    ('"x" <a@b@evil.net>',),
+    # The strict parser drops the readable address too
+    ('alice@example.org, "x" <a@b@evil.net>',),
+    # The readable one matches, but replies could go to the other
+    ("alice@example.org", "y@evil.net (Support"),
+])
+def test_a_reply_to_the_tool_cant_read_cant_pass(reply_tos):
+    # A mail client that reads it anyway could send replies there
+    check = reply_to_check(*reply_tos)
+    assert (check.result, check.evidence) == (
+        INCONCLUSIVE, "Reply-To has an address the tool couldn't read, so where replies go isn't known. Check the "
+                      "header by hand")
+
+
 def test_reply_to_evidence():
     check = reply_to_check("alice@example.org", "x@evil.net", "y@evil.net", "undisclosed")
     assert check.evidence == "Replies go to evil.net, undisclosed, not example.org"

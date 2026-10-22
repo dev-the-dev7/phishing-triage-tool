@@ -265,7 +265,9 @@ def _check_reply_to(parsed: ParsedEmail, from_addr: Address | None) -> Check:
                        "one a mail client uses isn't defined, so the addresses in all of them were checked.")
     encoded = [a for a in parsed.reply_to if a.decoded]
     noted = [f"{describe_encoded_addresses(encoded)}."] if encoded else []
-    if not parsed.reply_to:
+    # A mail client that reads it anyway could send replies there
+    unread = "Reply-To" in parsed.unread_address_headers
+    if not parsed.reply_to and not unread:
         return Check(name, Result.PASS, strength, "No Reply-To, replies go to the sender", caveats)
     if not from_addr or not from_addr.domain:
         return Check(name, Result.INCONCLUSIVE, strength, "No readable From domain to compare against",
@@ -283,6 +285,9 @@ def _check_reply_to(parsed: ParsedEmail, from_addr: Address | None) -> Check:
     if mismatches:
         evidence = f"Replies go to {join_first_five(list(dict.fromkeys(mismatches)), ', ')}, not {expected}"
         return Check(name, Result.FLAG, strength, evidence, caveats + noted)
+    if unread:
+        return Check(name, Result.INCONCLUSIVE, strength, "Reply-To has an address the tool couldn't read, so where "
+                     "replies go isn't known. Check the header by hand", caveats + noted)
     # A client that decodes the address may reply to what it shows
     if encoded:
         return Check(name, Result.INCONCLUSIVE, strength,

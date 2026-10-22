@@ -109,6 +109,7 @@ class ParsedEmail:
     return_path: list[Address] = field(default_factory=list)  # from every Return-Path header, in order
     return_path_headers: int = 0
     to: list[Address] = field(default_factory=list)
+    unread_address_headers: list[str] = field(default_factory=list)  # with an address the tool couldn't read
     subject: str = ""
     date: str = ""
     message_id: str = ""

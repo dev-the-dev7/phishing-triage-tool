@@ -231,6 +231,7 @@ def test_display_name_decoding(from_value, display_name):
 def test_dropped_address_warns(from_value):
     parsed = parse(f"From: {from_value}")
     assert f"From {UNREADABLE}. Check the header by hand." in parsed.parse_warnings
+    assert parsed.unread_address_headers == ["From"]
 
 
 @pytest.mark.parametrize("from_value", [
@@ -244,6 +245,7 @@ def test_dropped_address_warns(from_value):
 def test_unusual_but_readable_address_doesnt_warn(from_value):
     parsed = parse(f"From: {from_value}")
     assert not any(UNREADABLE in w for w in parsed.parse_warnings)
+    assert parsed.unread_address_headers == []
 
 
 def test_address_parser_error_gives_a_warning(monkeypatch):
@@ -256,6 +258,7 @@ def test_address_parser_error_gives_a_warning(monkeypatch):
     parsed = parse("From: a@example.org")
     assert parsed.from_addrs == []
     assert "From header couldn't be parsed (ValueError)" in parsed.parse_warnings
+    assert "From" in parsed.unread_address_headers
 
 
 @pytest.mark.parametrize("from_lines, headers", [
@@ -290,6 +293,7 @@ def test_a_header_the_tool_cant_read_doesnt_hide_the_others(name, broken):
     found = {"From": parsed.from_addrs, "Sender": parsed.sender, "Reply-To": parsed.reply_to}[name]
     assert [a.email for a in found] == ["x@evil.net"]
     assert parsed.parse_warnings == [f"{name} {UNREADABLE}. Check the header by hand."]
+    assert parsed.unread_address_headers == [name]
 
 
 def test_to_date_and_message_id():

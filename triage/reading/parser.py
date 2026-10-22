@@ -56,8 +56,8 @@ def _parse_message(raw: bytes) -> ParsedEmail:
     if not any(name in msg for name in ("From", "To", "Subject", "Date", "Received")):
         raise ValueError("no email headers found, is this an .eml file?")
 
-    warnings = []
-    from_addrs = _addresses(msg, "From", warnings, every_header=True)
+    warnings, unread = [], []
+    from_addrs = _addresses(msg, "From", warnings, unread, every_header=True)
     # Reported phish often arrive as an attachment, and the checks would read the forward
     attached = _attached_emails(msg)
     if len(attached) == 1:
@@ -70,9 +70,9 @@ def _parse_message(raw: bytes) -> ParsedEmail:
                         "each.")
 
     # One of each is allowed, but like From and Reply-To, the email can have more
-    sender = _addresses(msg, "Sender", warnings, every_header=True)
-    return_path = _addresses(msg, "Return-Path", warnings, every_header=True)
-    to = _addresses(msg, "To", warnings)
+    sender = _addresses(msg, "Sender", warnings, unread, every_header=True)
+    return_path = _addresses(msg, "Return-Path", warnings, unread, every_header=True)
+    to = _addresses(msg, "To", warnings, unread)
     # In From and Reply-To, encoded text is a check's evidence. No check reads what a client
     # shows for these, so it's a warning.
     for name, found in (("Sender", sender), ("Return-Path", return_path), ("To", to)):
@@ -94,11 +94,12 @@ def _parse_message(raw: bytes) -> ParsedEmail:
         from_addrs=from_addrs,
         from_headers=_count_headers(msg, "From"),
         sender=sender,
-        reply_to=_addresses(msg, "Reply-To", warnings, every_header=True),
+        reply_to=_addresses(msg, "Reply-To", warnings, unread, every_header=True),
         reply_to_headers=_count_headers(msg, "Reply-To"),
         return_path=return_path,
         return_path_headers=_count_headers(msg, "Return-Path"),
         to=to,
+        unread_address_headers=unread,
         subject=_text_header(msg, "Subject", warnings),
         date=_header(msg, "Date", warnings),
         # As written, since a search of the mail logs needs it exactly
@@ -156,7 +157,7 @@ def _raw_headers(msg, name) -> list[str]:
     return values
 
 
-def _addresses(msg, name, warnings, every_header=False) -> list[Address]:
+def _addresses(msg, name, warnings, unread, every_header=False) -> list[Address]:
     # As written, since the library decodes encoded words even inside an address
     raw = _raw_headers(msg, name) if every_header else _raw_headers(msg, name)[:1]
     try:
@@ -167,6 +168,7 @@ def _addresses(msg, name, warnings, every_header=False) -> list[Address]:
         lenient = [pair for value in raw for pair in getaddresses([value], strict=False)]
     except Exception as e:
         _warn_unreadable(warnings, name, e)
+        unread.append(name)
         return []
 
     pairs = [pair for found in per_header for pair in found]
@@ -182,9 +184,10 @@ def _addresses(msg, name, warnings, every_header=False) -> list[Address]:
                               decoded if decoded != addr else ""))
     dropped = {addr for _, addr in lenient if addr} - {addr for _, addr in pairs}
     # A header with an @ that gave no address, even when another header gave one
-    unread = any("@" in value and not any(addr for _, addr in found) for value, found in zip(raw, per_header))
-    if unread or dropped:
+    unread_header = any("@" in value and not any(addr for _, addr in found) for value, found in zip(raw, per_header))
+    if unread_header or dropped:
         warnings.append(f"{name} has an address the tool couldn't read safely. Check the header by hand.")
+        unread.append(name)
     return result
 
 
