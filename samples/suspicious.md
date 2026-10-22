@@ -33,19 +33,19 @@ SPF; Script, file or app link; Return-Path mismatch; Free webmail sender; Brand 
 
 ## Indicators
 
-| Type | Indicator, defanged |
-|---|---|
-| URL | `hxxp://paypa1[.]com/login/verify?case=88213` |
-| URL | `hxxps://bit[.]ly/3pPx9Qz` |
-| URL | `hxxp://203[.]0[.]113[.]45/t[.]gif?u=jordan[.]lee` |
-| Domain | `paypa1[.]com` |
-| Domain | `account-resolution[.]example` |
-| Domain | `bit[.]ly` |
-| IP | `203[.]0[.]113[.]45` |
-| Email | `security[@]paypa1[.]com` |
-| Email | `case-review[@]account-resolution[.]example` |
-| Email | `bounce[@]paypa1[.]com` |
-| SHA-256 | `043ea8960dc71f654cf0ac9ac501c16d09eed7b0e1528532fe25f122f1cc4f35` |
+| Type    | Indicator, defanged
+| ------- | -------------------
+| URL     | `hxxp://paypa1[.]com/login/verify?case=88213`
+| URL     | `hxxps://bit[.]ly/3pPx9Qz`
+| URL     | `hxxp://203[.]0[.]113[.]45/t[.]gif?u=jordan[.]lee`
+| Domain  | `paypa1[.]com`
+| Domain  | `account-resolution[.]example`
+| Domain  | `bit[.]ly`
+| IP      | `203[.]0[.]113[.]45`
+| Email   | `security[@]paypa1[.]com`
+| Email   | `case-review[@]account-resolution[.]example`
+| Email   | `bounce[@]paypa1[.]com`
+| SHA-256 | `043ea8960dc71f654cf0ac9ac501c16d09eed7b0e1528532fe25f122f1cc4f35`
 
 ## Typical follow-ups if confirmed malicious
 

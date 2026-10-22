@@ -18,6 +18,8 @@ from ..reading.iocs import defang, defang_text
 MAX_VALUE_CHARS = 300
 # Evidence, warnings and lookup results can hold several values, so they get more room
 MAX_LONG_CHARS = 1_000
+# The note's table columns line up in the raw text up to this width, a SHA-256 in its code span
+MAX_COLUMN_CHARS = 66
 
 HASH_NAMES = {32: "MD5", 40: "SHA-1", 64: "SHA-256"}
 RESULT_ORDER = [Result.FLAG, Result.INCONCLUSIVE, Result.PASS]
@@ -315,17 +317,31 @@ def _md_indicators(report: Report) -> list[str]:
         return ["None found."]
     # Without lookups the column would be empty
     looked_up = report.not_looked_up or any(row.results for row in report.indicators)
-    lines = ["| Type | Indicator, defanged | Reputation |" if looked_up else "| Type | Indicator, defanged |",
-             "|---|---|---|" if looked_up else "|---|---|"]
+    rows = [["Type", "Indicator, defanged", "Reputation"] if looked_up else ["Type", "Indicator, defanged"]]
     for row in report.indicators:
         named = f" (from the {row.named_by} check)" if row.named_by else ""
         cells = [row.kind, _md(defang(row.value), MAX_LONG_CHARS) + named]
         if looked_up:
             cells.append("; ".join(f"{r.service}: {_md(r.text, MAX_LONG_CHARS)}" for r in row.results))
         # A pipe ends a table cell even inside a code span, unless it's escaped
-        lines.append(f"| {' | '.join(cell.replace('|', chr(92) + '|') for cell in cells)} |")
+        rows.append([cell.replace("|", "\\|") for cell in cells])
+    lines = _md_table(rows)
     if report.not_looked_up:
         lines += ["", *(f"- Not looked up: {_missed_line(missed)}" for missed in report.not_looked_up)]
+    return lines
+
+
+def _md_table(rows: list[list[str]]) -> list[str]:
+    # Every column but the last is padded to its widest cell, so the separators line up in the
+    # raw text too. A cell past the limit, like a long URL, only pushes its own row over.
+    widths = [min(max(len(row[n]) for row in rows), MAX_COLUMN_CHARS) for n in range(len(rows[0]) - 1)]
+    header, *body = rows
+    divider = ["-" * width for width in widths] + ["-" * len(header[-1])]
+    lines = []
+    for row in [header, divider, *body]:
+        cells = [cell.ljust(width) for cell, width in zip(row, widths)] + [row[-1]]
+        # Without the closing pipe, so no row ends in padding
+        lines.append(("| " + " | ".join(cells)).rstrip())
     return lines
 
 

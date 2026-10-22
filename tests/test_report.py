@@ -293,20 +293,36 @@ def test_the_indicators_table():
     vt = Reputation("VirusTotal", LookupStatus.FOUND, "9 of 90 engines flagged it malicious")
     over = Reputation("VirusTotal", LookupStatus.SKIPPED, "skipped, over the limit of 8 lookups a run",
                       for_the_run=True)
+    # Padded so the separators line up in the raw text, and the last column isn't
     assert note_section(render_markdown(build_text_report(found, {})), "## Indicators") == [
-        "| Type | Indicator, defanged |", "|---|---|",
-        "| URL | `hxxps://evil[.]com/p\\|q` |", "| Domain | `evil[.]com` |", "| Domain | `a[.]com` |"]
+        "| Type   | Indicator, defanged",
+        "| ------ | -------------------",
+        "| URL    | `hxxps://evil[.]com/p\\|q`",
+        "| Domain | `evil[.]com`",
+        "| Domain | `a[.]com`"]
     note = render_markdown(build_text_report(found, {"evil.com": [vt], "a.com": [over]}))
     assert note_section(note, "## Indicators") == [
-        "| Type | Indicator, defanged | Reputation |", "|---|---|---|",
-        "| URL | `hxxps://evil[.]com/p\\|q` |  |",
-        "| Domain | `evil[.]com` | VirusTotal: `9 of 90 engines flagged it malicious` |",
-        "| Domain | `a[.]com` |  |",
+        "| Type   | Indicator, defanged       | Reputation",
+        "| ------ | ------------------------- | ----------",
+        "| URL    | `hxxps://evil[.]com/p\\|q` |",
+        "| Domain | `evil[.]com`              | VirusTotal: `9 of 90 engines flagged it malicious`",
+        "| Domain | `a[.]com`                 |",
         "- Not looked up: VirusTotal: skipped, over the limit of 8 lookups a run (1 indicator, the one with no "
         "VirusTotal result)"]
     # One result is enough for the column, with no lookup missed for the run
     note = render_markdown(build_text_report(found, {"evil.com": [vt]}))
-    assert note_section(note, "## Indicators")[0] == "| Type | Indicator, defanged | Reputation |"
+    assert note_section(note, "## Indicators")[0] == "| Type   | Indicator, defanged       | Reputation"
+
+
+def test_a_long_url_only_pushes_its_own_row_over():
+    found = Indicators(urls=["https://evil.com/" + "a" * 80], domains=["evil.com"])
+    vt = Reputation("VirusTotal", LookupStatus.FOUND, "9 of 90 engines flagged it malicious")
+    header, divider, url, domain = note_section(render_markdown(build_text_report(found, {"evil.com": [vt]})),
+                                                "## Indicators")
+    # The other rows still line up, at the width of a SHA-256 in its code span
+    column = len("| Domain | ") + 66
+    assert header.index(" | Reputation") == divider.rindex(" | ") == domain.rindex(" | ") == column
+    assert url.rindex(" |") > column
 
 
 def test_a_note_for_alert_text_has_no_email_sections():

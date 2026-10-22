@@ -244,7 +244,7 @@ def test_alert_text_can_be_written_to_a_note(capsys, tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(ALERT.encode())))
     code, _, _ = run(capsys, "--text", "-", "--out", tmp_path / "note.md")
     assert code == 0
-    assert "| Domain | `evil[.]com` |" in (tmp_path / "note.md").read_text()
+    assert "\n| Domain | `evil[.]com`\n" in (tmp_path / "note.md").read_text()
 
 
 @pytest.mark.parametrize("args, error", [
