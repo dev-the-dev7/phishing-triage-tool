@@ -22,6 +22,11 @@ def seconds(task) -> float:
     return time.perf_counter() - start
 
 
+# A pause from another process slows one run, but code that can't keep up is slow every time
+def fastest_seconds(task) -> float:
+    return min(seconds(task) for _ in range(3))
+
+
 # A slower or busier machine, like a shared one running CI, slows a regression as much as the
 # code, so it can give every limit here more room: TIMING_SCALE=3 triples them
 SCALE = float(os.environ.get("TIMING_SCALE", "1"))
@@ -148,8 +153,8 @@ def triage(raw: bytes) -> None:
 @pytest.mark.slow
 @pytest.mark.parametrize("unit", UNITS)
 def test_time_grows_with_the_input(unit):
-    small = seconds(lambda: triage(crafted_email(unit, 20_000)))
-    large = seconds(lambda: triage(crafted_email(unit, 40_000)))
+    small = fastest_seconds(lambda: triage(crafted_email(unit, 20_000)))
+    large = fastest_seconds(lambda: triage(crafted_email(unit, 40_000)))
     # The added 0.1 seconds covers timer noise on the quick ones
     assert large < 3 * small + 0.1 * SCALE
 
@@ -162,6 +167,6 @@ TEXT_UNITS = UNITS + [" ", "[", "[ ", " [.", "(dot", "hxx", "h**ps", "a@", "a@b"
 @pytest.mark.slow
 @pytest.mark.parametrize("unit", TEXT_UNITS)
 def test_alert_text_time_grows_with_the_input(unit):
-    small = seconds(lambda: indicators_from_text((unit * 100_000)[:100_000]))
-    large = seconds(lambda: indicators_from_text((unit * 200_000)[:200_000]))
+    small = fastest_seconds(lambda: indicators_from_text((unit * 100_000)[:100_000]))
+    large = fastest_seconds(lambda: indicators_from_text((unit * 200_000)[:200_000]))
     assert large < 3 * small + 0.1 * SCALE
