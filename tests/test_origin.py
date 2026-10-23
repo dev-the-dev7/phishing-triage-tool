@@ -184,7 +184,7 @@ def test_no_received_headers():
     assert origin(f"from 776393159873 named unknown by gmailapi.google.com with HTTPREST; {DATE}") is None
 
 
-@pytest.mark.xfail(reason="README limitation: a sender that calls itself *.outlook.com is skipped as internal, "
+@pytest.mark.xfail(reason="Known limitation: a sender that calls itself *.outlook.com is skipped as internal, "
                           "and only --enrich checks its IP's owner",
                    raises=AssertionError)
 def test_sender_claiming_a_microsoft_name():

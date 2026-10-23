@@ -461,7 +461,7 @@ def test_text_a_browser_shows_is_link_text(shown):
     # A second value browsers skip because it isn't valid, which the tool takes as the value
     '<a href="https://evil.com/">paypal<span style="display:none;display:x"> </span>.com</a>',
 ])
-@pytest.mark.xfail(reason="README limitation: a space hidden by CSS the tool doesn't read splits the domain",
+@pytest.mark.xfail(reason="Known limitation: a space hidden by CSS the tool doesn't read splits the domain",
                    raises=AssertionError)
 def test_space_hidden_by_css_the_tool_doesnt_read(hidden):
     assert check_link_mismatch(html_email(hidden)).result == Result.FLAG
