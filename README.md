@@ -41,18 +41,19 @@ SPF; Script, file or app link; Return-Path mismatch; Free webmail sender; Brand 
 - **The sender:** SPF, DKIM, and DMARC from your provider's Authentication-Results, a From
   that mail clients can read more than one way, a Reply-To, Return-Path, or display name
   that doesn't match the sender, and free webmail
-- **Lookalikes:** lookalike domains and brands joined to other words, in the sender and in
-  links, with short brand names like Apple checked against an English word list so
-  ordinary words aren't flagged
+- **Lookalikes:** lookalike domains (typosquatting and homoglyphs) and brands joined to
+  other words (combosquatting), in the sender and in links, with short brand names like
+  Apple checked against an English word list so ordinary words aren't flagged
 - **Links and content:** link text that shows one domain but goes to another, links that
   run a script or open a file share or another program, links rewritten by Safe Links,
   Proofpoint, or Google's redirect read as where they really go, text hidden inside
   words, emails that are only an image, and text added by CSS
 - **Origin and indicators:** the server that handed the email to your provider, and the
-  URLs, domains, IPs, email addresses, and file hashes, defanged, from an email or from
-  alert text
+  indicators of compromise (IOCs), defanged: URLs, domains, IPs, email addresses, and file
+  hashes, from an email or from alert text
 - **Reputation, with `--enrich`:** VirusTotal and AbuseIPDB lookups, each IP's network and
-  country, domains registered in the last 30 days, and hops faked as Microsoft's servers
+  country, newly registered domains (under 30 days old), and hops faked as Microsoft's
+  servers
 
 Findings that mean more together, like a lookalike domain that passes DMARC, are named as
 patterns. Every check ends as flag, pass, or inconclusive, with a fixed strength.
