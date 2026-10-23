@@ -1,5 +1,30 @@
 # Configuration
 
+## API keys
+
+`--enrich` needs an API key from [VirusTotal](https://www.virustotal.com) and one from
+[AbuseIPDB](https://www.abuseipdb.com). The tool reads the keys from environment
+variables. In PowerShell:
+
+```powershell
+# For this window only. Read-Host keeps the key out of PowerShell's history file, which
+# saves everything typed at the prompt.
+$env:VT_API_KEY = Read-Host "VirusTotal API key"
+$env:ABUSEIPDB_API_KEY = Read-Host "AbuseIPDB API key"
+
+# For every new window, saved in your Windows account. Apps already open, like VS Code,
+# only see it once they're restarted.
+[Environment]::SetEnvironmentVariable("VT_API_KEY", (Read-Host "VirusTotal API key"), "User")
+[Environment]::SetEnvironmentVariable("ABUSEIPDB_API_KEY", (Read-Host "AbuseIPDB API key"), "User")
+```
+
+Without a key, that service's lookups show as unavailable and the rest of the output is
+the same.
+
+Behind a proxy that inspects TLS, as many company networks have, the lookups show as
+unavailable with `SSLError` until `REQUESTS_CA_BUNDLE` points to a certificate file that
+includes the company's root certificate.
+
 ## Your organization's settings
 
 What's yours to change is in `triage/settings.py`, in three parts.

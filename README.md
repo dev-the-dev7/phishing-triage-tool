@@ -1,74 +1,90 @@
 # Phishing Triage Tool
 
-A Python CLI that gathers evidence for phishing triage from a reported email.
-The analyst makes the call.
+[![Tests](https://github.com/dev-the-dev7/phishing-triage-tool/actions/workflows/tests.yml/badge.svg)](https://github.com/dev-the-dev7/phishing-triage-tool/actions/workflows/tests.yml)
+![Python 3.14+](https://img.shields.io/badge/python-3.14%2B-blue)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-## What it does
+A Python CLI for Tier 1 phishing triage. It gathers the evidence an analyst would collect
+by hand for a reported email (sender authentication, lookalike domains, where links really
+go, and indicator reputation) and writes a note ready to paste into the ticket. The
+analyst makes the call.
 
-- Parsing the email: headers, addresses, text and HTML bodies, links, and attachment hashes
-  (SHA-256, computed in memory)
-- Checks on the sender: SPF, DKIM, and DMARC results, a From that can be read more than
-  one way, a Reply-To, Return-Path, or display name that doesn't match the sender, and
-  free webmail
-- Lookalike domains and brands joined to other words, in the sender and in links, with
-  short brand names like Apple and Meta checked against an English word list, so ordinary
-  words aren't flagged
-- Link text that shows one domain but goes to another, and links that run a script or
-  open a file share or another program
-- Links rewritten by Microsoft's Safe Links, Proofpoint, or Google's redirect, read as where
-  they really go, with a weak flag for a link the sender put behind Google's redirect
-- Text hidden inside words, emails that are only an image, and text added by CSS
-- Named patterns that combine findings, like a lookalike domain that passes DMARC
-- The server that handed the email to your provider, found from the Received headers
-- Indicators (URLs, domains, IPs, email addresses, hashes), defanged for sharing. From an
-  email, or from alert text with `python -m triage --text alert.txt` (`-` reads standard
-  input)
-- Reputation lookups with `--enrich`: VirusTotal for hashes, domains, URLs, and IPs, and
-  AbuseIPDB for IPs, with each IP's network and country, and checks for domains
-  registered in the last 30 days and for hops faked as Microsoft's servers
-- Updating the tool's copy of the Public Suffix List with `python -m triage.update_suffixes`
-- A report in the terminal: a summary with the strongest flag and the count of each
-  result, any patterns, the email's details and origin, every check with flags first, and
-  the indicators
-- A Markdown triage note to paste into a ticket with `--out note.md`, and the same report
-  as JSON for other tools with `--json report.json`. With either, the terminal shows a
-  short summary. `-` prints one instead of writing a file, for a pipe, and the summary
-  goes to stderr. There's a sample of each, from a synthetic email, in `samples/`.
+## Sample output
 
-## Installing
+The findings from the note for `tests/fixtures/suspicious.eml`, a made-up phishing email.
+Values from the email are defanged and kept in code spans, so none of them can become a
+link. Around them, the note has a summary with the email's headers and origin, the
+indicators, follow-ups picked from what was found, and space for the analyst's decision.
+The full note is in [samples/suspicious.md](samples/suspicious.md), and the same report as
+JSON in [samples/suspicious.json](samples/suspicious.json).
+
+```markdown
+## Signals
+
+- **DMARC** (strong): `dmarc=fail for paypa1[.]com (from mx[.]example[.]net, ignored 1 untrusted header(s))`
+- **Reply-To mismatch** (strong): `Replies go to account-resolution[.]example, not paypa1[.]com`
+- **Lookalike domain** (strong): `paypa1[.]com [link, sender] spells 'paypal' with lookalike characters but isn't paypal[.]com`
+- **Link mismatch** (strong): `text shows www[.]paypal[.]com but goes to paypa1[.]com`
+- **Display name mismatch** (medium): `"PayPal Security" mentions "paypal" but the mail is from paypa1[.]com`
+
+## Inconclusive
+
+- **DKIM** (medium): `dkim=none (from mx[.]example[.]net, ignored 1 untrusted header(s))`
+
+## Passed
+
+SPF; Script, file or app link; Return-Path mismatch; Free webmail sender; Brand joined to a word
+```
+
+## What it checks
+
+- **The sender:** SPF, DKIM, and DMARC from your provider's Authentication-Results, a From
+  that mail clients can read more than one way, a Reply-To, Return-Path, or display name
+  that doesn't match the sender, and free webmail
+- **Lookalikes:** lookalike domains and brands joined to other words, in the sender and in
+  links, with short brand names like Apple checked against an English word list so
+  ordinary words aren't flagged
+- **Links and content:** link text that shows one domain but goes to another, links that
+  run a script or open a file share or another program, links rewritten by Safe Links,
+  Proofpoint, or Google's redirect read as where they really go, text hidden inside
+  words, emails that are only an image, and text added by CSS
+- **Origin and indicators:** the server that handed the email to your provider, and the
+  URLs, domains, IPs, email addresses, and file hashes, defanged, from an email or from
+  alert text
+- **Reputation, with `--enrich`:** VirusTotal and AbuseIPDB lookups, each IP's network and
+  country, domains registered in the last 30 days, and hops faked as Microsoft's servers
+
+Findings that mean more together, like a lookalike domain that passes DMARC, are named as
+patterns. Every check ends as flag, pass, or inconclusive, with a fixed strength.
+
+## Quick start
 
 The tool needs Python 3.14 or newer, and is tested with 3.14 and 3.15 on Windows and
-Linux. On an older version it stops with an error instead of running, since an older
-Python can read an email differently, and a check can then pass when it shouldn't.
-
-It runs from this folder with `python -m triage`, without being installed as a package.
-To set it up in PowerShell:
+Linux. On an older version it stops with an error, since an older Python can read an email
+differently, and a check can then pass when it shouldn't. It runs from the repository's
+folder, without being installed as a package. In PowerShell:
 
 ```powershell
-# 3.14, or a newer version you have, like py -3.15
+git clone https://github.com/dev-the-dev7/phishing-triage-tool
+cd phishing-triage-tool
+# 3.14, or a newer version
 py -3.14 -m venv .venv
 # If PowerShell won't run scripts, allow them for this window only:
 # Set-ExecutionPolicy -Scope Process RemoteSigned
 .venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
+
+# The made-up email the tests use
+python -m triage tests/fixtures/suspicious.eml
 ```
 
 On Linux, create the environment with `python3.14 -m venv .venv`, or the newer version you
-have, and activate it with `source .venv/bin/activate`.
+have, and activate it with `source .venv/bin/activate`. Each package in `requirements.txt`
+is pinned to one version, so a new release isn't picked up without anyone looking at it.
 
-`requirements.txt` holds what the tool needs: `requests` for the lookups, `idna` for
-writing domains as browsers do, and what `requests` installs, each pinned to one version
-so a new release isn't picked up without anyone looking at it. To run the tests too,
-install `requirements-dev.txt` instead, which adds pytest and coverage.
-
-## Running it
-
-With the environment active, from this folder:
+## Usage
 
 ```powershell
-# The made-up email the tests use, to see what a report looks like
-python -m triage tests/fixtures/suspicious.eml
-
 # Real emails and alert text, and anything made from them, stay in data\, which git
 # ignores, since they hold personal data
 python -m triage data\reported.eml --out data\note.md --json data\report.json --enrich
@@ -81,42 +97,74 @@ python -m triage --text data\alert.txt --enrich
 python -m triage data\reported.eml --out - | Set-Clipboard
 ```
 
-## Setting up the lookups
+- `--out` writes the Markdown note and `--json` the same report as JSON. With either, the
+  terminal shows a short summary. `-` prints one instead of writing a file, for a pipe,
+  and the summary goes to stderr.
+- `--text` lists the indicators in alert text, and `-` reads it from standard input.
+- `--enrich` looks the indicators up. It reads the API keys from `VT_API_KEY` and
+  `ABUSEIPDB_API_KEY`, set up as in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+- `python -m triage.update_suffixes` updates the tool's copy of the Public Suffix List.
 
-`--enrich` needs an API key from [VirusTotal](https://www.virustotal.com) and one from
-[AbuseIPDB](https://www.abuseipdb.com). Its limits are set for the free keys, so with your
-organization's paid keys, raise them in `triage/settings.py`. The tool reads the keys from
-environment variables. In PowerShell:
+Your domains, executives, brands, and lookup limits are in `triage/settings.py`. The part
+about your organization ships empty, so its checks do nothing until you fill it in, and
+the limits are set for the free keys. What each part is for is in
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md), and each setting is explained where it's
+set.
 
-```powershell
-# For this window only. Read-Host keeps the key out of PowerShell's history file, which
-# saves everything typed at the prompt.
-$env:VT_API_KEY = Read-Host "VirusTotal API key"
-$env:ABUSEIPDB_API_KEY = Read-Host "AbuseIPDB API key"
+## Key design decisions
 
-# For every new window, saved in your Windows account. Apps already open, like VS Code,
-# only see it once they're restarted.
-[Environment]::SetEnvironmentVariable("VT_API_KEY", (Read-Host "VirusTotal API key"), "User")
-[Environment]::SetEnvironmentVariable("ABUSEIPDB_API_KEY", (Read-Host "AbuseIPDB API key"), "User")
-```
+- **No phishing score or verdict.** The checks overlap, so adding them up counts one fact
+  several times. The tool lists what it found, and the analyst decides.
+- **Only the topmost Authentication-Results header is trusted.** Your provider adds it on
+  top. One lower down was already in the message, so the sender could have faked a pass.
+- **Nothing in the email is opened, and nothing is uploaded.** HTML is read as text, never
+  rendered, and attachments are hashed in memory. `--enrich` only asks for reports the
+  services already have.
+- **Not found means unknown, not clean.** A phishing domain registered yesterday has no
+  history.
+- **Lookalikes are matched word by word, not by a similarity percentage.** So the same
+  typo on another TLD or in a subdomain is still caught, and "one typo" is easier to
+  defend than a threshold picked by testing.
+- **Text from the email can't change how the report looks.** Control, invisible, and
+  line-breaking characters are shown as codes, so a right-to-left override can't disguise
+  a filename, and a newline in the Subject can't add a fake result line.
 
-Then run `python -m triage path/to/email.eml --enrich`. Without a key, that service's
-lookups show as unavailable and the rest of the output is the same.
+The reasons behind these and the rest are in [docs/DESIGN.md](docs/DESIGN.md).
 
-Behind a proxy that inspects TLS, as many company networks have, the lookups show as
-unavailable with `SSLError` until `REQUESTS_CA_BUNDLE` points to a certificate file that
-includes the company's root certificate.
+## Limitations
 
-## Your organization's settings
+- **Reputation lags behind new phishing.** A domain registered this morning is usually not
+  found or clean, so a clean result is no reason to close a report.
+- **Phishing sent through a real platform passes the sender checks**, like a Facebook page
+  named "Meta Support". The evidence there is where the links end up.
+- **A real signed email resent by someone else (DKIM replay) still passes DKIM and
+  DMARC**, since the signature is genuine.
+- **Rules in a `<style>` block aren't read.** Text they hide isn't flagged, and where they
+  could change a link's text, the link check is inconclusive instead of a pass.
+- **VirusTotal's free key is for personal use**, and with it a run makes at most 8
+  VirusTotal lookups, showing the rest as skipped. Triage at work needs your
+  organization's paid key.
 
-What's yours to change is in `triage/settings.py`, explained in
-[docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+The full list is in [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
+
+## Future work
+
+- An optional `--render` that shows the HTML in a headless browser with scripts off, in a
+  container with no network, so what CSS hides or adds becomes evidence instead of
+  inconclusive
+- Links inside attachments, like a PDF's, read in the same kind of container
+- Feeding the JSON to a ticket system or SOAR playbook
+- Lookups in parallel, for paid keys that allow hundreds a run
+
+The rest is at the end of [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Running the tests
 
-With `requirements-dev.txt` installed, from this folder:
+From the repository's folder, with the environment active:
 
 ```powershell
+# What the tool needs, plus pytest and coverage
+python -m pip install -r requirements-dev.txt
 # Every test but the slow ones, in about 20 seconds
 python -m pytest
 # The timing sweep and a long run on damaged emails, in a minute or two
@@ -129,15 +177,9 @@ python -m coverage run -m pytest --ignore=tests/test_timing.py
 python -m coverage report
 ```
 
-The timing tests run crafted input that made the tool take minutes while it was being
-built, or could. Each input must finish within a second, and in the slow sweep, doubling
-the input mustn't more than triple the time. On a slower or busier machine,
-`$env:TIMING_SCALE = 3` triples the one-second limit and the sweep's allowance for timer
-noise, as the GitHub Actions workflow does.
-
-Each test marked xfail is one of the limitations in
-[docs/LIMITATIONS.md](docs/LIMITATIONS.md), written as what should happen. One that starts
-passing fails the run, until its mark and its line there are removed.
+On a slower or busier machine, `$env:TIMING_SCALE = 3` triples the timing tests'
+one-second limit and the sweep's allowance for timer noise, as the GitHub Actions workflow
+does.
 
 ## How the code is laid out
 
@@ -151,6 +193,7 @@ triage/
   __init__.py             stops on a Python older than 3.14
   __main__.py             the command, which runs the stages in order
   reading/                reads the email, judging nothing
+    __init__.py           makes the folder a package, so coverage sees its files
     parser.py             reads a .eml file into a ParsedEmail: headers, addresses,
                           bodies, links, and attachment hashes
     html_reader.py        reads an HTML body the way a mail client shows it
@@ -168,7 +211,7 @@ triage/
     english_words.txt     the word list short brand names are checked against
   enrich.py               looks the indicators up in VirusTotal and AbuseIPDB, with a
                           cache and the limits from settings.py
-  report/                 shows what was found
+  report/                 turns what was found into the report
     __init__.py           builds one report and renders it for the terminal, as
                           Markdown, and as JSON, so the three can't disagree
     patterns.py           finds patterns in the findings, without changing any result
@@ -184,11 +227,19 @@ The tests in `tests/` mostly have one file per module, plus `test_cli.py` for th
 line, `test_robustness.py` for damaged emails, and `test_timing.py` for input crafted to
 be slow. The emails in `tests/fixtures/` are made up.
 
-## Design decisions
+## How it was built and tested
 
-Why the tool works the way it does, and what could come next, is in
-[docs/DESIGN.md](docs/DESIGN.md).
-
-## Limitations
-
-What the tool can miss or get wrong is in [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
+- I planned the structure, wrote the first skeleton and the first version of the checks,
+  and made the design decisions. An AI coding assistant reviewed the code for mistakes and
+  ways around the checks. Its reviews kept growing the scope, so from there it wrote most
+  of the code, and I reviewed every change before committing it.
+- It was tested on made-up phishing emails, in `tests/fixtures/`, and on ordinary emails
+  from my own inbox, which stay out of the repository.
+- Every line and branch is covered by a test, and CI fails below 100%, on Windows and
+  Linux with Python 3.14 and the newest release.
+- Timing tests run crafted input that made the tool take minutes while it was being
+  built, or could. Each input must finish within a second, and in a longer sweep,
+  doubling it mustn't more than triple the time. A long run feeds the tool damaged emails.
+- Some limitations are tests of what should happen, marked xfail. One that starts passing
+  fails the run, until its mark and its line in [docs/LIMITATIONS.md](docs/LIMITATIONS.md)
+  are removed.

@@ -359,6 +359,13 @@ def test_the_samples_are_up_to_date(capsys, tmp_path):
     assert (tmp_path / "report.json").read_bytes() == (samples / "suspicious.json").read_bytes().replace(b"\r\n", b"\n")
 
 
+def test_the_readme_shows_the_sample_note_as_it_is():
+    # The README copies part of the note, so a change to the note has to reach it too
+    root = Path(__file__).parent.parent
+    excerpt = (root / "README.md").read_text(encoding="utf-8").split("```markdown\n")[1].split("```\n")[0]
+    assert excerpt in (root / "samples" / "suspicious.md").read_text(encoding="utf-8")
+
+
 def write_text(tmp_path, data: bytes) -> Path:
     path = tmp_path / "alert.txt"
     path.write_bytes(data)
